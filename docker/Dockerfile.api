@@ -1,0 +1,28 @@
+# FastAPI inference server (ColTurk-VDR retriever)
+# Placeholder — finalized in Day 12 (Productization phase).
+
+FROM pytorch/pytorch:2.5.0-cuda12.4-cudnn9-runtime
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates poppler-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+# Python deps (install minimal set first; full install on volume mount)
+COPY pyproject.toml /app/
+RUN pip install --no-cache-dir \
+    fastapi uvicorn[standard] pydantic huggingface-hub transformers \
+    colpali-engine qdrant-client Pillow
+
+# Copy source
+COPY src/ /app/src/
+COPY api/ /app/api/
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -fsS http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

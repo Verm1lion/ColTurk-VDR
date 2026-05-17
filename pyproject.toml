@@ -1,0 +1,110 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "colturk-vdr"
+version = "0.1.0-pre"
+description = "A late-interaction visual document retriever for Turkish enterprise documents (ColBERT-style on Qwen3-VL-4B)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Mert Karatay", email = "info@yenipara.tech" }]
+keywords = ["computer-vision", "visual-document-retrieval", "colpali", "colbert", "qwen3-vl", "turkish", "multimodal", "rag"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Pin versions before v1.0 (Tier 1.5 reproducibility target)
+dependencies = [
+    "torch>=2.5,<2.6",
+    "transformers>=4.50,<5.0",
+    "accelerate>=0.34",
+    "peft>=0.13",
+    "bitsandbytes>=0.44",
+    "datasets>=3.0",
+    "huggingface-hub>=0.26",
+    "colpali-engine>=0.4",
+    "vidore-benchmark>=4.0",
+    "mteb>=1.20",
+    "qdrant-client>=1.11",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "wandb>=0.18",
+    "tqdm",
+    "numpy>=1.26,<2.0",
+    "pandas>=2.2",
+    "Pillow>=10.4",
+    "pypdf>=4.3",
+    "pdf2image>=1.17",
+    "playwright>=1.48",  # for scraping mevzuat.gov.tr
+    "faker>=30.0",       # Turkish locale: tr_TR
+    "reportlab>=4.2",    # synthetic PDF generation
+    "weasyprint>=62",    # alt synthetic PDF (HTML→PDF)
+    "albumentations>=1.4",  # image augmentation
+    "scikit-learn>=1.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.7",
+    "black>=24.10",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "pre-commit>=4.0",
+]
+notebook = [
+    "jupyter>=1.1",
+    "ipywidgets>=8.1",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+]
+serving = [
+    "vllm>=0.6",  # Qwen3-VL reader serving
+    "celery>=5.4",
+    "redis>=5.1",
+]
+dashboard = [
+    "streamlit>=1.40",
+    "gradio>=5.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/Verm1lion/ColTurk-VDR"
+Repository = "https://github.com/Verm1lion/ColTurk-VDR"
+Issues = "https://github.com/Verm1lion/ColTurk-VDR/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]
+ignore = ["E501"]  # line-too-long handled by formatter
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false  # gradual typing
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-v --strict-markers"

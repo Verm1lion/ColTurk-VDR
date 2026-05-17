@@ -1,0 +1,22 @@
+# Streamlit dashboard for live demo (Turkish PDF drop → top-5 page retrieval + Qwen3-VL answer)
+# Placeholder — finalized in Day 12.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    streamlit Pillow pdf2image requests qdrant-client
+
+COPY dashboard/ /app/dashboard/
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -fsS http://localhost:8501/_stcore/health || exit 1
+
+CMD ["streamlit", "run", "dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]

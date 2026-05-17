@@ -1,0 +1,99 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Models, weights, large artifacts ---
+# Root-level only (anchored with /) — keeps src/models/ Python package tracked
+/models/
+/checkpoints/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+hf_cache/
+.cache/
+
+# --- Datasets (downloaded raw + processed; only release synthetic to HF Hub) ---
+data/raw/
+data/processed/
+data/external/
+data/interim/
+*.parquet
+*.arrow
+data/*.tar
+data/*.zip
+
+# --- Logs & runs ---
+wandb/
+mlruns/
+runs/
+logs/
+*.log
+
+# --- Colab / Jupyter ---
+.ipynb_checkpoints/
+*.ipynb_meta
+
+# --- Docker ---
+.dockerignore.local
+
+# --- Secrets — NEVER COMMIT ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+tokens.json
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- OS ---
+*.tmp
+*.bak
+
+# --- Project-specific ---
+output/
+results/
+submissions/
+demo_videos/
