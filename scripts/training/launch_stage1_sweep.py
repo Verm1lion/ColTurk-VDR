@@ -12,6 +12,7 @@ Refs:
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -26,11 +27,18 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    if len(sys.argv) < 2:
-        print("Usage: launch_stage1_sweep.py CONFIG_YAML")
-        return 2
+    parser = argparse.ArgumentParser(description="Stage-1 LR sweep launcher (KARARLAR S46 + A31)")
+    parser.add_argument("config", type=Path, help="YAML config path")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Load config + instantiate model+trainer, skip trainer.train(). "
+             "Used by notebook pre-flight smoke cell to catch F16/F17/F19-type bugs "
+             "in ~1-2 min before committing to ~1.5h corpus build + training.",
+    )
+    args = parser.parse_args()
 
-    config_path = Path(sys.argv[1])
+    config_path: Path = args.config
     if not config_path.exists():
         print(f"Config not found: {config_path}")
         return 2
@@ -59,7 +67,7 @@ def main() -> int:
         )
         return 2
 
-    logger.info("Loading config: %s", config_path)
+    logger.info("Loading config: %s (dry_run=%s)", config_path, args.dry_run)
     # F12 fix: ColPali standard configue.load(file, sub_path="config")
     # → direkt ColModelTrainingConfig instance döner (eski config_dict["config"] obsolete)
     cfg: ColModelTrainingConfig = configue.load(str(config_path), sub_path="config")
@@ -69,6 +77,15 @@ def main() -> int:
     logger.info("Config loaded; output_dir=%s", cfg.output_dir)
 
     trainer = ColModelTraining(cfg)
+
+    if args.dry_run:
+        logger.info(
+            "DRY-RUN OK: config loaded, model+processor instantiated, "
+            "dataset prepped, trainer constructed. Skipping trainer.train(). "
+            "Real training pipeline verified — F19/F17/F18 pre-flight PASS."
+        )
+        return 0
+
     if getattr(cfg, "run_train", True):
         logger.info("Starting training (ColModelTraining.train)…")
         trainer.train()

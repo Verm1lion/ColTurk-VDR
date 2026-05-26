@@ -17,7 +17,7 @@ config:
     pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
     torch_dtype: !ext torch.bfloat16
     use_cache: false
-    attn_implementation: "flash_attention_2"
+    attn_implementation: "sdpa"
 
   dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
   # F11 fix: eval_dataset_loader removed (configs/data/vidore_v3_eval.yaml mevcut değil)
