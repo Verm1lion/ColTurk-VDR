@@ -19,12 +19,18 @@ config:
     use_cache: false
     attn_implementation: "sdpa"
 
-  dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
+  # F17a fix: dataset_loading_func ColModelTrainingConfig'de YOK; canonical field = train_dataset.
+  # F17b fix: load_train_set_ir_negs colpali-engine 0.3.16'da YOK; gerçek isim load_train_set_ir(num_negs=N).
+  # num_negs=2 → Nemotron K=2 @0.95 hard-neg (S37).
+  train_dataset:
+    (): colpali_engine.utils.dataset_transformation.load_train_set_ir
+    num_negs: 2
+
   # F11 fix: eval_dataset_loader removed (configs/data/vidore_v3_eval.yaml mevcut değil)
   # F13 fix: run_train true + run_eval false (sweep ¼ epoch için training loss S47 verdict yeterli)
+  # F17c fix: add_suffix field ColModelTrainingConfig'de YOK.
   run_train: true
   run_eval: false
-  add_suffix: true
 
   loss_func:
     (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
