@@ -38,14 +38,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 V3_PUBLIC_SUBTASKS = (
-    "vidore/vidore-finance-en-test",
-    "vidore/vidore-finance-fr-test",
-    "vidore/vidore-hr-test",
-    "vidore/vidore-industrial-test",
-    "vidore/vidore-computer-science-test",
-    "vidore/vidore-pharmaceuticals-test",
-    "vidore/vidore-physics-test",
-    "vidore/vidore-energy-test",
+    # F9 fix: doğru HF dataset slug'ları — vidore HF org page verify (2026-05-26)
+    # Pattern: vidore/vidore_v3_{domain} (underscore + vidore_v3_ prefix)
+    "vidore/vidore_v3_finance_en",
+    "vidore/vidore_v3_finance_fr",
+    "vidore/vidore_v3_hr",
+    "vidore/vidore_v3_industrial",
+    "vidore/vidore_v3_computer_science",
+    "vidore/vidore_v3_pharmaceuticals",
+    "vidore/vidore_v3_physics",
+    "vidore/vidore_v3_energy",
 )
 
 NGRAM_SIZE = 13          # S41 verbatim
@@ -181,6 +183,14 @@ def _layer4_tfidf(
         import numpy as np
     except ImportError:
         logger.error("L4: scikit-learn not installed. Run: pip install scikit-learn")
+        return {}
+
+    # F10 fix: empty input defensive guard (F9 V3 load fail veya empty train için)
+    if not v3_corpus_texts or not train_records:
+        logger.warning(
+            "L4: empty input (train=%d, v3=%d) — skipping",
+            len(train_records), len(v3_corpus_texts),
+        )
         return {}
 
     stop = boilerplate_stoplist or set()

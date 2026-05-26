@@ -31,8 +31,11 @@ config:
     attn_implementation: "flash_attention_2"
 
   dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
-  eval_dataset_loader: !import ../data/vidore_v3_eval.yaml
-  run_eval: true
+  # F11 fix: eval_dataset_loader removed (configs/data/vidore_v3_eval.yaml mevcut değil → configue load fail)
+  # F13 fix: run_train true + run_eval false (sweep ¼ epoch için training loss S47 verdict yeterli;
+  # dev eval Stage-1 full öncesi yapılır)
+  run_train: true
+  run_eval: false
   add_suffix: true
 
   # ColPali canonical InfoNCE + hard-neg pairs (Nemotron §3.3.2 K=2 @0.95, S28 lock)
@@ -54,8 +57,7 @@ config:
     optim: "adamw_torch"                     # S37 ColPali maintainer "we do not use paged_adamw_8bit"
     save_strategy: "steps"
     save_steps: 500
-    eval_strategy: "steps"
-    eval_steps: 500
+    eval_strategy: "no"                      # F11: run_eval=false ile uyum
     logging_steps: 10
     report_to: "wandb"
     run_name: "colturk-vdr-stage1-lr-sweep-lr2e5"

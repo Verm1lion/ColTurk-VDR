@@ -60,14 +60,24 @@ def main() -> int:
         return 2
 
     logger.info("Loading config: %s", config_path)
-    config_dict = configue.load(str(config_path))
-    cfg: ColModelTrainingConfig = config_dict["config"]
+    # F12 fix: ColPali standard configue.load(file, sub_path="config")
+    # → direkt ColModelTrainingConfig instance döner (eski config_dict["config"] obsolete)
+    cfg: ColModelTrainingConfig = configue.load(str(config_path), sub_path="config")
+    if not isinstance(cfg, ColModelTrainingConfig):
+        logger.error("Loaded config is not ColModelTrainingConfig (type=%s)", type(cfg).__name__)
+        return 2
     logger.info("Config loaded; output_dir=%s", cfg.output_dir)
 
     trainer = ColModelTraining(cfg)
-    logger.info("Starting training (ColModelTraining.train)…")
-    trainer.train()
-    logger.info("Training done. Output → %s", cfg.output_dir)
+    if getattr(cfg, "run_train", True):
+        logger.info("Starting training (ColModelTraining.train)…")
+        trainer.train()
+        # Save final model (ColPali entry standard pattern)
+        if hasattr(trainer, "save"):
+            trainer.save()
+        logger.info("Training done. Output → %s", cfg.output_dir)
+    else:
+        logger.warning("config.run_train=False — training skipped")
     return 0
 
 
