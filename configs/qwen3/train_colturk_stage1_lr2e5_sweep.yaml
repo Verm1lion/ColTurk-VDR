@@ -1,0 +1,85 @@
+# Stage-1 LR Sweep — Run A (LR=2e-5, Nemotron §3.3 LoRA 10x rule)
+#
+# Refs (KARARLAR):
+#   - S46 — Stage-1 path lock: raw Qwen/Qwen3-VL-4B-Instruct (no warm-start, S36 reopen post-Stage-1)
+#   - S45 — Baseline anchor FAILED (transformers v5 ekosistem v4-era ColPali stack'ini kırdı)
+#   - S37 — Recipe (LoRA r=32, α=32, dropout=0.1, target regex, bf16, AdamW, K=2 @0.95, 1 epoch full)
+#   - S40 — Corpus mix 173K (60K EN-vdr + 60K FR-vdr + 30K colpali + 8K DocVQA + 5K InfoVQA + 5K OCR-IDL + 5K FATURA)
+#   - A31 — LR sweep zorunlu (2e-5 vs 5e-5, ¼ epoch each, winner full Stage-1)
+#
+# Sweep amacı: 1/4 epoch (~43K page tüketim) ile LR=2e-5 vs LR=5e-5 dev NDCG@10
+# karşılaştırması. Winner = Stage-1 full run LR locked (S47).
+#
+# ¼ epoch nasıl: num_train_epochs=1 + max_steps=1350 (43K page / effective batch 32 = ~1350 step).
+# 1 epoch full = ~5400 step (173K / 32) — bu sweep yaml ¼ = 1350 step.
+
+config:
+  (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
+  output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr2e5-sweep
+
+  processor:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3Processor
+    pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
+
+  model:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3
+    pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
+    torch_dtype: !ext torch.bfloat16
+    use_cache: false
+    attn_implementation: "flash_attention_2"
+
+  dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
+  eval_dataset_loader: !import ../data/vidore_v3_eval.yaml
+  run_eval: true
+  add_suffix: true
+
+  # ColPali canonical InfoNCE + hard-neg pairs (Nemotron §3.3.2 K=2 @0.95, S28 lock)
+  loss_func:
+    (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
+
+  tr_args:
+    !ext transformers.TrainingArguments
+    output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr2e5-sweep
+    overwrite_output_dir: true
+    num_train_epochs: 1
+    max_steps: 1350                          # ¼ epoch (173K / 32 = 5400 full → 1350 quarter)
+    per_device_train_batch_size: 2           # A100 80GB Qwen3-VL-4B bf16 LoRA r=32 NaFlex 1024
+    gradient_accumulation_steps: 16          # effective batch 32 (S37 lock)
+    learning_rate: 2.0e-5                    # ★ SWEEP VARIANT A: Nemotron LoRA 10x rule (2e-6 full FT → 2e-5 LoRA)
+    lr_scheduler_type: "linear"              # S37 verbatim (cosine değil, linear decay)
+    warmup_ratio: 0.025                      # ColPali default
+    bf16: true
+    optim: "adamw_torch"                     # S37 ColPali maintainer "we do not use paged_adamw_8bit"
+    save_strategy: "steps"
+    save_steps: 500
+    eval_strategy: "steps"
+    eval_steps: 500
+    logging_steps: 10
+    report_to: "wandb"
+    run_name: "colturk-vdr-stage1-lr-sweep-lr2e5"
+    dataloader_num_workers: 8
+    gradient_checkpointing: true
+    seed: 42
+
+  peft_config:
+    (): peft.LoraConfig
+    r: 32
+    lora_alpha: 32
+    lora_dropout: 0.1
+    init_lora_weights: "gaussian"
+    bias: "none"
+    task_type: "FEATURE_EXTRACTION"
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+
+# Run:
+#   accelerate launch scripts/train/train_colbert.py \
+#     configs/qwen3/train_colturk_stage1_lr2e5_sweep.yaml
+#
+# Sıralı 2. run:
+#   accelerate launch scripts/train/train_colbert.py \
+#     configs/qwen3/train_colturk_stage1_lr5e5_sweep.yaml
+#
+# Karşılaştırma: W&B group `stage1-lr-sweep`, 2 run (lr2e5 + lr5e5).
+# Winner = ViDoRe V3 dev NDCG@10 (ColPali native eval) lider, S47 lock.

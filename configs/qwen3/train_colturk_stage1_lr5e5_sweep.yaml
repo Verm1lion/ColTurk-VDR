@@ -1,0 +1,62 @@
+# Stage-1 LR Sweep — Run B (LR=5e-5, ColPali canonical)
+#
+# Refs: aynı sweep A (lr2e5) — sadece LR farkı. Bkz. train_colturk_stage1_lr2e5_sweep.yaml.
+
+config:
+  (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
+  output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr5e5-sweep
+
+  processor:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3Processor
+    pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
+
+  model:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3
+    pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
+    torch_dtype: !ext torch.bfloat16
+    use_cache: false
+    attn_implementation: "flash_attention_2"
+
+  dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
+  eval_dataset_loader: !import ../data/vidore_v3_eval.yaml
+  run_eval: true
+  add_suffix: true
+
+  loss_func:
+    (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
+
+  tr_args:
+    !ext transformers.TrainingArguments
+    output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr5e5-sweep
+    overwrite_output_dir: true
+    num_train_epochs: 1
+    max_steps: 1350                          # ¼ epoch (S37 lock paralel sweep)
+    per_device_train_batch_size: 2
+    gradient_accumulation_steps: 16          # effective batch 32
+    learning_rate: 5.0e-5                    # ★ SWEEP VARIANT B: ColPali canonical
+    lr_scheduler_type: "linear"
+    warmup_ratio: 0.025
+    bf16: true
+    optim: "adamw_torch"
+    save_strategy: "steps"
+    save_steps: 500
+    eval_strategy: "steps"
+    eval_steps: 500
+    logging_steps: 10
+    report_to: "wandb"
+    run_name: "colturk-vdr-stage1-lr-sweep-lr5e5"
+    dataloader_num_workers: 8
+    gradient_checkpointing: true
+    seed: 42
+
+  peft_config:
+    (): peft.LoraConfig
+    r: 32
+    lora_alpha: 32
+    lora_dropout: 0.1
+    init_lora_weights: "gaussian"
+    bias: "none"
+    task_type: "FEATURE_EXTRACTION"
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'

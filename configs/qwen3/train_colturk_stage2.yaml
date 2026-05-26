@@ -1,0 +1,95 @@
+# Stage-2 Training Config — ColTurk-VDR Turkish-heavy fine-tune
+#
+# Base: Stage-1 merged checkpoint (LoRA merge_and_unload edilmiş tam ağırlık).
+# Stage-2 = yeni LoRA üzerine LoRA değil; Stage-1 LoRA'sı full model'a katılmış,
+# Stage-2 ondan yeniden bir LoRA katmanı eğitir.
+#
+# Refs:
+#   - Prompt C §4b verbatim verified (DR Round B 2026-05-18)
+#   - KARARLAR S26 (private dekontlar Stage-2 mix ~%1)
+#   - KARARLAR S27 (Stage-2 corpus revize: KAP -> şirket IR sayfaları)
+#
+# Stage-2 corpus ~73K page (sentez tablosu):
+#   - llamaindex/vdr-multilingual-train FR subset                                30K
+#   - mevzuat.gov.tr (kanun + KHK + yönetmelik + tebliğ, kamu malı 5846 m.31)    15K
+#   - Şirket IR sayfaları (KAP yerine — Koç/Sabancı/Tüpraş/Ereğli direct)        12K
+#   - YÖK tez 2022+ mühendislik (kapak + ilk 2 sayfa redact)                      8K
+#   - Mert'in 289 dekontu × 2-3 augment                                          ~0.6K
+#   - EN replay (catastrophic forgetting önleme)                                  5K
+#   - TÜİK + TCMB rapor (kamu malı)                                               3K
+
+config:
+  (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
+  output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage2
+
+  processor:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3Processor
+    pretrained_model_name_or_path: !path ${OUTPUT_DIR}/colturk-vdr-stage1/merged
+
+  model:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3
+    pretrained_model_name_or_path: !path ${OUTPUT_DIR}/colturk-vdr-stage1/merged
+    torch_dtype: !ext torch.bfloat16
+    use_cache: false
+    attn_implementation: "flash_attention_2"
+
+  # TR-heavy blend + cross-lingual + EN replay
+  dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
+  data_blend:
+    - {name: "colturk-tr-mevzuat",            weight: 0.20}
+    - {name: "colturk-tr-ir-pages",           weight: 0.16}
+    - {name: "colturk-tr-yok-engineering",    weight: 0.11}
+    - {name: "colturk-tr-tuik-tcmb",          weight: 0.04}
+    - {name: "colturk-tr-dekontlar-private",  weight: 0.01}
+    - {name: "vdr-multilingual-train-fr",     weight: 0.41}
+    - {name: "colturk-en-replay-stage1-tail", weight: 0.07}
+  eval_dataset_loader: !import ../data/vidore_v3_eval.yaml
+  run_eval: true
+  add_suffix: true
+
+  loss_func:
+    (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
+
+  tr_args:
+    !ext transformers.TrainingArguments
+    output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage2
+    overwrite_output_dir: true
+    num_train_epochs: 2
+    per_device_train_batch_size: 4
+    gradient_accumulation_steps: 16          # effective batch 64
+    learning_rate: 2.0e-5                    # daha düşük (warm start)
+    lr_scheduler_type: "cosine"
+    warmup_ratio: 0.05
+    bf16: true
+    optim: "paged_adamw_8bit"
+    save_strategy: "steps"
+    save_steps: 250
+    eval_strategy: "steps"
+    eval_steps: 250
+    logging_steps: 10
+    report_to: "wandb"
+    run_name: "colturk-vdr-stage2-tr"
+    dataloader_num_workers: 8
+    gradient_checkpointing: true
+    seed: 42
+
+  peft_config:
+    (): peft.LoraConfig
+    r: 32
+    lora_alpha: 32
+    lora_dropout: 0.1
+    init_lora_weights: "gaussian"
+    bias: "none"
+    task_type: "FEATURE_EXTRACTION"
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+
+# Run:
+#   accelerate launch scripts/train/train_colbert.py \
+#     configs/qwen3/train_colturk_stage2.yaml
+#
+# Post Stage-2:
+#   1. Optional: scripts/training/patch_bidirectional.py (P0.3, NV-Embed)
+#   2. Stage-3: scripts/training/merge_checkpoints.py (4 ckpt linear)
+#   3. Stage-4: scripts/eval/rerank_stage4.py (Nemotron rerank top-50)

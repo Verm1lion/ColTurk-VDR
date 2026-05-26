@@ -1,0 +1,90 @@
+# Stage-1 Training Config — ColTurk-VDR English-heavy curriculum
+#
+# Base: OpenSearch-AI/Ops-Colqwen3-4B warm-start (S18) — Qwen3-VL-4B native,
+# 128-dim projection, already at NDCG@10 ~61 on ViDoRe V3 4B class.
+#
+# Refs:
+#   - Prompt C §4a verbatim verified (DR Round B 2026-05-18)
+#   - colpali-engine v0.3.16+ ColQwen3 native wrapper
+#   - scripts/configs/qwen3_5/train_colqwen3_5_model.py upstream template
+#
+# Loss: ColbertPairwiseNegativeCELoss (in-batch + 4-K mined hard neg via
+# Stage-1 mining with Ops-Colqwen3-4B teacher).
+#
+# Target Stage-1 corpus ~168K page (Stage-2 sentez tablosu):
+#   - llamaindex/vdr-multilingual-train EN+FR (IT/ES/DE drop, V3 docs FR+EN only)  50K
+#   - SEC EDGAR (sec.gov direct, PD)                                              25K
+#   - FDA DailyMed (PD)                                                           25K
+#   - nick007x/arxiv-papers cs.* CC-BY filter                                     20K
+#   - DTIC public reports Distribution-A (PD)                                     15K
+#   - HAL CC-BY filtered (physics + general FR)                                   10K
+#   - EU Commission Working Papers (CC-BY-4.0, NOT EU-OSHA, S25 contamination)     5K
+#   - Banque de France + INSEE Etalab 2.0                                          8K
+#
+# A100 80GB envelope: ~150-180K page × 3-5 epoch × 1024² ≈ 66-140h.
+# Plan: 168K @ 3 epoch @ 1024² ≈ 48h target.
+
+config:
+  (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
+  output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1
+
+  processor:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3Processor
+    pretrained_model_name_or_path: "OpenSearch-AI/Ops-Colqwen3-4B"
+
+  model:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3
+    pretrained_model_name_or_path: "OpenSearch-AI/Ops-Colqwen3-4B"
+    torch_dtype: !ext torch.bfloat16
+    use_cache: false
+    attn_implementation: "flash_attention_2"
+
+  # Data loader: ColPali-engine BEIR-style loader with mined hard negatives
+  dataset_loading_func: !ext colpali_engine.utils.dataset_transformation.load_train_set_ir_negs
+  eval_dataset_loader: !import ../data/vidore_v3_eval.yaml
+  run_eval: true
+  add_suffix: true
+
+  # KARARLAR S28: NV-Retriever positive-aware hard neg, threshold 0.95
+  # (legal/finance subsets use 0.90 — handled in mine_hard_negatives.py per-domain)
+  loss_func:
+    (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
+
+  tr_args:
+    !ext transformers.TrainingArguments
+    output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1
+    overwrite_output_dir: true
+    num_train_epochs: 3
+    per_device_train_batch_size: 4
+    gradient_accumulation_steps: 8           # effective batch 32 (single A100)
+    learning_rate: 5.0e-5
+    lr_scheduler_type: "cosine"
+    warmup_ratio: 0.025                      # ColPali default
+    bf16: true
+    optim: "paged_adamw_8bit"
+    save_strategy: "steps"
+    save_steps: 500
+    eval_strategy: "steps"
+    eval_steps: 500
+    logging_steps: 10
+    report_to: "wandb"
+    run_name: "colturk-vdr-stage1-en-fr"
+    dataloader_num_workers: 8
+    gradient_checkpointing: true
+    seed: 42
+
+  peft_config:
+    (): peft.LoraConfig
+    r: 32
+    lora_alpha: 32
+    lora_dropout: 0.1
+    init_lora_weights: "gaussian"
+    bias: "none"
+    task_type: "FEATURE_EXTRACTION"
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+
+# Run:
+#   accelerate launch scripts/train/train_colbert.py \
+#     configs/qwen3/train_colturk_stage1.yaml

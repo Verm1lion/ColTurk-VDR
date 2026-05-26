@@ -23,16 +23,16 @@ classifiers = [
 
 # Pin versions before v1.0 (Tier 1.5 reproducibility target)
 dependencies = [
-    "torch>=2.5,<2.6",
-    "transformers>=4.50,<5.0",
-    "accelerate>=0.34",
-    "peft>=0.13",
+    "torch>=2.5,<2.12",         # colpali-engine 0.3.14+ requires torch<2.12
+    "transformers>=5.0,<6.0",    # colpali-engine 0.3.14+ requires transformers>=5.0
+    "accelerate>=1.1,<2.0",      # colpali-engine 0.3.14+ requires accelerate>=1.1
+    "peft>=0.18,<0.20",          # colpali-engine 0.3.14+ requires peft>=0.18,<0.20
     "bitsandbytes>=0.44",
     "datasets>=3.0",
     "huggingface-hub>=0.26",
-    "colpali-engine>=0.4",
-    "vidore-benchmark>=4.0",
-    "mteb>=1.20",
+    "colpali-engine>=0.3.16,<0.4",  # ColQwen3 native (S17); 0.3.14+ required
+    # vidore-benchmark dropped — KARARLAR S21: retriever submission deprecated, mteb v2 ModelMeta path kanonik
+    "mteb>=2.0",                 # MTEB v2 (KARARLAR S21 verbatim)
     "qdrant-client>=1.11",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",

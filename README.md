@@ -1,12 +1,13 @@
 # ColTurk-VDR
 
-> **🚧 WIP — v0.1-pre · Day-0 setup phase · 2026-05-18**
+> **🚧 WIP — v0.1-pre · Day-1 baseline ready · 2026-05-18**
 >
-> ColBERT-style late-interaction **visual document retriever** for Turkish enterprise documents (e-invoices, KYC, legal, financial). Built on **Qwen3-VL-4B-Instruct** (Apache-2.0).
+> ColBERT-style late-interaction **visual document retriever** for Turkish enterprise documents (e-invoices, KYC, legal, financial). Built on **Qwen3-VL-4B-Instruct** (Apache-2.0) via `colpali_engine.models.ColQwen3` (Qwen3-VL native, verified 2026-05-18).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Base Model: Apache-2.0](https://img.shields.io/badge/Base-Apache--2.0-blue.svg)](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct)
-[![Status: WIP](https://img.shields.io/badge/status-WIP%20v0.1--pre-orange.svg)]()
+[![Status: Day-1 baseline ready](https://img.shields.io/badge/status-Day--1%20baseline%20ready-yellowgreen.svg)]()
+[![Submission: MTEB v2](https://img.shields.io/badge/submission-MTEB%20v2%20canonical-blue.svg)](https://github.com/embeddings-benchmark/mteb)
 
 ---
 

@@ -57,6 +57,14 @@ data/interim/
 data/*.tar
 data/*.zip
 
+# --- PII / Private data (KVKK — NEVER COMMIT) ---
+# Contains real Turkish PII (TCKN, IBAN, names). Training-only, not redistributable.
+/data/private_tr/
+
+# --- Synthetic TR rendered PNGs (large binaries, ~1.2GB at full scale) ---
+# Raw text content + queries stay in git; rendered pages go to HF Hub instead.
+/data/synthetic_tr/rendered_pages/
+
 # --- Logs & runs ---
 wandb/
 mlruns/
