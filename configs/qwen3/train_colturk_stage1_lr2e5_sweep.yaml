@@ -43,7 +43,7 @@ config:
     (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
 
   tr_args:
-    !ext transformers.TrainingArguments
+    (): transformers.training_args.TrainingArguments
     output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr2e5-sweep
     overwrite_output_dir: true
     num_train_epochs: 1
