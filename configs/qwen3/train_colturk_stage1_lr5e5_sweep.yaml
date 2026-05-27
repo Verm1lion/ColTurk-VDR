@@ -38,7 +38,7 @@ config:
   tr_args:
     (): transformers.training_args.TrainingArguments
     output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr5e5-sweep
-    overwrite_output_dir: true
+    # F22 fix: overwrite_output_dir transformers v5'te REMOVED.
     num_train_epochs: 1
     max_steps: 1350                          # ¼ epoch (S37 lock paralel sweep)
     per_device_train_batch_size: 2
