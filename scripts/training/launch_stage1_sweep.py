@@ -33,8 +33,14 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="Load config + instantiate model+trainer, skip trainer.train(). "
-             "Used by notebook pre-flight smoke cell to catch F16/F17/F19-type bugs "
-             "in ~1-2 min before committing to ~1.5h corpus build + training.",
+             "Catches F16/F17/F19/F20/F22-type bugs (config + model + trainer construct).",
+    )
+    parser.add_argument(
+        "--smoke-step",
+        action="store_true",
+        help="Like --dry-run but ALSO runs 1 training step (~30-60sn A100). "
+             "Catches F23+ (dataloader + sampler + collator + forward + compute_loss + "
+             "backward + optim) — issues that trigger only at trainer.train() time.",
     )
     args = parser.parse_args()
 
@@ -76,7 +82,10 @@ def main() -> int:
         )
         return 2
 
-    logger.info("Loading config: %s (dry_run=%s)", config_path, args.dry_run)
+    logger.info(
+        "Loading config: %s (dry_run=%s smoke_step=%s)",
+        config_path, args.dry_run, args.smoke_step,
+    )
     # F12 fix: ColPali standard configue.load(file, sub_path="config")
     # → direkt ColModelTrainingConfig instance döner (eski config_dict["config"] obsolete)
     cfg: ColModelTrainingConfig = configue.load(str(config_path), sub_path="config")
@@ -85,13 +94,62 @@ def main() -> int:
         return 2
     logger.info("Config loaded; output_dir=%s", cfg.output_dir)
 
+    # F23 fix: ColPali ContrastiveTrainer._get_train_sampler(self) — v4-style, no train_dataset arg.
+    # transformers v5 Trainer._get_dataloader (line 987) calls sampler_fn(dataset) — passes dataset arg.
+    # TypeError: "_get_train_sampler() takes 1 positional argument but 2 were given".
+    # Monkey-patch in module dict BEFORE ColModelTraining instantiates ContrastiveTrainer (in .train()).
+    from colpali_engine.trainer.contrastive_trainer import ContrastiveTrainer
+
+    def _patched_get_train_sampler(self, train_dataset=None):
+        """v5-compat signature. Routes:
+        - train_dataset_list None (single dataset, our case): delegate to v5 Trainer base
+          which accepts and USES the train_dataset arg internally.
+        - train_dataset_list set (multi-dataset ColPali concat): use SingleDatasetBatchSampler
+          (ignores train_dataset arg, uses self.train_dataset_list set in __init__).
+        """
+        if self.train_dataset_list is None:
+            from transformers import Trainer
+            return Trainer._get_train_sampler(self, train_dataset)
+        import torch
+        from colpali_engine.data.sampler import SingleDatasetBatchSampler
+        generator = torch.Generator()
+        generator.manual_seed(self.args.seed)
+        return SingleDatasetBatchSampler(
+            self.train_dataset_list,
+            self.args.train_batch_size,
+            drop_last=self.args.dataloader_drop_last,
+            generator=generator,
+        )
+
+    ContrastiveTrainer._get_train_sampler = _patched_get_train_sampler
+    logger.info(
+        "F23 patch applied: ContrastiveTrainer._get_train_sampler now accepts train_dataset arg"
+    )
+
+    # --smoke-step: override tr_args to do 1 step + no save + no wandb (catches F24+ pre-flight)
+    if args.smoke_step:
+        logger.info("SMOKE-STEP: overriding tr_args (max_steps=1, save=no, report_to=[])")
+        cfg.tr_args.max_steps = 1
+        cfg.tr_args.save_strategy = "no"
+        cfg.tr_args.report_to = []
+        cfg.tr_args.logging_steps = 1
+
     trainer = ColModelTraining(cfg)
 
     if args.dry_run:
         logger.info(
             "DRY-RUN OK: config loaded, model+processor instantiated, "
-            "dataset prepped, trainer constructed. Skipping trainer.train(). "
-            "Real training pipeline verified — F19/F17/F18 pre-flight PASS."
+            "dataset prepped, trainer constructed. Skipping trainer.train()."
+        )
+        return 0
+
+    if args.smoke_step:
+        logger.info("SMOKE-STEP: invoking trainer.train() for 1 step…")
+        trainer.train()
+        logger.info(
+            "SMOKE-STEP OK: 1 training step completed without error. "
+            "Full pipeline (dataloader + sampler + collator + forward + compute_loss + "
+            "backward + optim) verified."
         )
         return 0
 
