@@ -148,11 +148,35 @@ def main() -> int:
         "F24 patch applied: get_train_dataloader sets query/pos/neg prefixes unconditionally"
     )
 
-    # --smoke-step: override tr_args to do 1 step + no save + no wandb (catches F24+ pre-flight)
+    # F25 fix: W&B graceful fallback. yaml has report_to="wandb"; if WANDB_API_KEY is
+    # missing/invalid (<40 chars — legacy keys are 40 hex, new keys "wandb_v1_..." are 80+),
+    # wandb.init() in the on_train_begin callback HARD-CRASHES the whole training.
+    # The sweep verdict (S47) reads trainer_state.json (local file), NOT wandb — so wandb is
+    # purely optional live-monitoring. Disable it gracefully if key invalid → training proceeds,
+    # loss still logged to trainer_state.json.
+    _wandb_key = os.environ.get("WANDB_API_KEY", "")
+    _report_to = cfg.tr_args.report_to
+    _report_list = _report_to if isinstance(_report_to, list) else ([_report_to] if _report_to else [])
+    if "wandb" in _report_list and len(_wandb_key) < 40:
+        logger.warning(
+            "WANDB_API_KEY invalid (len=%d, need 40+) — disabling wandb (report_to=[]). "
+            "Training continues; loss still saved to trainer_state.json for S47 verdict. "
+            "To enable wandb: paste a valid 40+ char key into Colab Secrets (wandb.ai/authorize).",
+            len(_wandb_key),
+        )
+        cfg.tr_args.report_to = []
+    elif "wandb" in _report_list:
+        logger.info("WANDB_API_KEY valid (len=%d) — wandb logging enabled", len(_wandb_key))
+
+    # --smoke-step: override tr_args to do 1 step + TEST save path + no wandb (catches F24+/save pre-flight)
     if args.smoke_step:
-        logger.info("SMOKE-STEP: overriding tr_args (max_steps=1, save=no, report_to=[])")
+        logger.info(
+            "SMOKE-STEP: overriding tr_args (max_steps=1, save_strategy=steps + save_steps=1 "
+            "to TEST checkpoint/PEFT-adapter save path, report_to=[])"
+        )
         cfg.tr_args.max_steps = 1
-        cfg.tr_args.save_strategy = "no"
+        cfg.tr_args.save_strategy = "steps"
+        cfg.tr_args.save_steps = 1          # F26 pre-flight: validate save path (real run saves @ step 500)
         cfg.tr_args.report_to = []
         cfg.tr_args.logging_steps = 1
 
@@ -166,12 +190,12 @@ def main() -> int:
         return 0
 
     if args.smoke_step:
-        logger.info("SMOKE-STEP: invoking trainer.train() for 1 step…")
+        logger.info("SMOKE-STEP: invoking trainer.train() for 1 step (+ save @ step 1)…")
         trainer.train()
         logger.info(
-            "SMOKE-STEP OK: 1 training step completed without error. "
+            "SMOKE-STEP OK: 1 training step + checkpoint save completed without error. "
             "Full pipeline (dataloader + sampler + collator + forward + compute_loss + "
-            "backward + optim) verified."
+            "backward + optim + PEFT-adapter save) verified."
         )
         return 0
 
