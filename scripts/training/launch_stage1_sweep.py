@@ -48,6 +48,15 @@ def main() -> int:
         os.environ["OUTPUT_DIR"] = str(Path.cwd() / "outputs")
         logger.info("OUTPUT_DIR set → %s", os.environ["OUTPUT_DIR"])
 
+    # F20 fix: colpali_engine.utils.dataset_transformation module top'ta:
+    #   USE_LOCAL_DATASET = os.environ.get("USE_LOCAL_DATASET", "1") == "1"
+    # Default "1" (TRUE) → load_train_set_ir base_path = "./data_dir/" (yok).
+    # "0" override → base_path = "manu/" → HF manu/colpali-corpus + manu/colpali-queries
+    # (her ikisi public, parquet, WebFetch ile mevcut doğrulandı).
+    # colpali_engine import'tan ÖNCE set edilmeli (module-load time read).
+    os.environ.setdefault("USE_LOCAL_DATASET", "0")
+    logger.info("USE_LOCAL_DATASET=%s (HF manu/* path)", os.environ["USE_LOCAL_DATASET"])
+
     try:
         import configue
     except ImportError:
