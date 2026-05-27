@@ -126,6 +126,28 @@ def main() -> int:
         "F23 patch applied: ContrastiveTrainer._get_train_sampler now accepts train_dataset arg"
     )
 
+    # F24 fix: ColPali get_train_dataloader sets self.query_prefix/pos_prefix/neg_prefix
+    # ONLY in the multi-dataset (train_dataset_list set) branch. For a single dataset
+    # (load_train_set_ir returns one ColPaliEngineDataset → train_dataset_list=None),
+    # get_train_dataloader early-returns via super().get_train_dataloader() WITHOUT
+    # setting those prefixes, then compute_loss crashes:
+    #   AttributeError: 'ContrastiveTrainer' object has no attribute 'query_prefix'
+    # Patch: set the 3 prefixes from the collator unconditionally before delegating.
+    # Collator class attrs (VisualRetrieverCollator): query_prefix="query_",
+    # pos_doc_prefix="doc_", neg_doc_prefix="neg_doc_" (WebFetch verified).
+    _orig_get_train_dataloader = ContrastiveTrainer.get_train_dataloader
+
+    def _patched_get_train_dataloader(self):
+        self.query_prefix = self.data_collator.query_prefix
+        self.pos_prefix = self.data_collator.pos_doc_prefix
+        self.neg_prefix = self.data_collator.neg_doc_prefix
+        return _orig_get_train_dataloader(self)
+
+    ContrastiveTrainer.get_train_dataloader = _patched_get_train_dataloader
+    logger.info(
+        "F24 patch applied: get_train_dataloader sets query/pos/neg prefixes unconditionally"
+    )
+
     # --smoke-step: override tr_args to do 1 step + no save + no wandb (catches F24+ pre-flight)
     if args.smoke_step:
         logger.info("SMOKE-STEP: overriding tr_args (max_steps=1, save=no, report_to=[])")
