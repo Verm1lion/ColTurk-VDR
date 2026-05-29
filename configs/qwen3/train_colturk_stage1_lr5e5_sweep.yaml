@@ -66,4 +66,10 @@ config:
     init_lora_weights: "gaussian"
     bias: "none"
     task_type: "FEATURE_EXTRACTION"
-    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+    # F28 fix: custom_text_proj YENİ kafa (raw Qwen3-VL'de yok → ColQwen3 random ekler).
+    # target_modules'ta LoRA olunca base random proj KAYDEDİLMİYOR → checkpoint reusable değil
+    # (sweep'te bu yüzden adapter sadece lora_A/B içerdi, base kayıp). modules_to_save = FULL
+    # train+save → raw base + adapter ile reprodüksiyon. target_modules'tan ÇIKARILDI (aynı modül
+    # hem LoRA hem modules_to_save = PEFT çakışması).
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$)'
+    modules_to_save: ["custom_text_proj"]

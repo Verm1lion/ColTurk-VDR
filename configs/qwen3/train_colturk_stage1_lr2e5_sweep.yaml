@@ -79,7 +79,10 @@ config:
     init_lora_weights: "gaussian"
     bias: "none"
     task_type: "FEATURE_EXTRACTION"
-    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(custom_text_proj).*$)'
+    # F28 fix: custom_text_proj YENİ kafa → modules_to_save (FULL train+save), target_modules'tan çıkarıldı.
+    # Detay: lr5e5 sweep yaml F28 yorumu. Reusable checkpoint için zorunlu.
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$)'
+    modules_to_save: ["custom_text_proj"]
 
 # Run:
 #   accelerate launch scripts/train/train_colbert.py \
