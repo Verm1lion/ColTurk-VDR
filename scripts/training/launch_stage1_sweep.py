@@ -42,6 +42,14 @@ def main() -> int:
              "Catches F23+ (dataloader + sampler + collator + forward + compute_loss + "
              "backward + optim) — issues that trigger only at trainer.train() time.",
     )
+    parser.add_argument(
+        "--push-to-hub",
+        default="",
+        help="HF repo id to push the trained adapter to after training "
+             "(e.g. Verm1ion/ColTurk-VDR-Stage1-val-lr5e5). S49 persistence fix — "
+             "Colab /content is ephemeral; without this the adapter is lost on disconnect. "
+             "Uses HF_TOKEN env. Private repo. Skipped for --dry-run/--smoke-step.",
+    )
     args = parser.parse_args()
 
     config_path: Path = args.config
@@ -215,6 +223,24 @@ def main() -> int:
         if hasattr(trainer, "save"):
             trainer.save()
         logger.info("Training done. Output → %s", cfg.output_dir)
+
+        # S49 persistence: push adapter off-box before the ephemeral Colab disk dies.
+        if args.push_to_hub:
+            try:
+                from huggingface_hub import HfApi
+                api = HfApi(token=os.environ.get("HF_TOKEN"))
+                api.create_repo(args.push_to_hub, repo_type="model", private=True, exist_ok=True)
+                api.upload_folder(
+                    folder_path=str(cfg.output_dir),
+                    repo_id=args.push_to_hub,
+                    repo_type="model",
+                )
+                logger.info("Pushed adapter → https://huggingface.co/%s", args.push_to_hub)
+            except Exception as exc:
+                logger.error(
+                    "push-to-hub FAILED (%s) — adapter still on local disk at %s. "
+                    "Rescue manually before the session dies.", exc, cfg.output_dir
+                )
     else:
         logger.warning("config.run_train=False — training skipped")
     return 0
