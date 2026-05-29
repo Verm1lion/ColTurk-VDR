@@ -40,16 +40,16 @@ config:
     output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-lr5e5-sweep
     # F22 fix: overwrite_output_dir transformers v5'te REMOVED.
     num_train_epochs: 1
-    max_steps: 1350                          # ¼ epoch (S37 lock paralel sweep)
+    max_steps: 100                           # F27: sweep LR-seçimi için kısaltıldı (~196s/step → 1350=6gün imkansız; 100 step=~5.5h/LR). Full Stage-1'de 1350+ kullanılacak.
     per_device_train_batch_size: 2
     gradient_accumulation_steps: 16          # effective batch 32
     learning_rate: 5.0e-5                    # ★ SWEEP VARIANT B: ColPali canonical
     lr_scheduler_type: "linear"
-    warmup_ratio: 0.025
+    warmup_steps: 10                         # F27: max_steps=100 ile ratio çok kısa → sabit 10 step. warmup_ratio deprecated.
     bf16: true
     optim: "adamw_torch"
     save_strategy: "steps"
-    save_steps: 500
+    save_steps: 50                           # F27: max_steps=100 → checkpoint-50 + checkpoint-100 (Cell 9 en yükseği seçer)
     eval_strategy: "no"                      # F11: run_eval=false ile uyum
     logging_steps: 10
     report_to: "wandb"
