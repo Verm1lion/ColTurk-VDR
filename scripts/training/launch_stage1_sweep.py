@@ -63,6 +63,15 @@ def main() -> int:
     os.environ.setdefault("USE_LOCAL_DATASET", "0")
     logger.info("USE_LOCAL_DATASET=%s (HF manu/* path)", os.environ["USE_LOCAL_DATASET"])
 
+    # W&B routing: HF WandbCallback defaults project="huggingface" + key-owner default entity +
+    # no grouping (verified transformers v5.9.0 integration_utils WandbCallback.setup). Set these so
+    # the two sweep runs land at wandb.ai/verm1lion-colturk-vdr/colturk-vdr grouped under stage1-lr-sweep.
+    # Read by wandb SDK at init (on_train_begin); setdefault preserves any user override. Observability
+    # only — S47 verdict reads local trainer_state.json, NOT wandb.
+    os.environ.setdefault("WANDB_PROJECT", "colturk-vdr")
+    os.environ.setdefault("WANDB_ENTITY", "verm1lion-colturk-vdr")
+    os.environ.setdefault("WANDB_RUN_GROUP", "stage1-lr-sweep")
+
     try:
         import configue
     except ImportError:
