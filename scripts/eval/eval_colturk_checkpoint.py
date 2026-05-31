@@ -28,6 +28,14 @@ Then full:
     python scripts/eval/eval_colturk_checkpoint.py \
         --adapter Verm1lion/ColTurk-VDR-Stage1-sweep-lr5e5 \
         --output eval/results/colturk_lr5e5_v3.json
+
+CURVE mode (find the best checkpoint along a run's trajectory) — eval every
+checkpoint-N/ under a local training output_dir, emit NDCG@10-vs-step + the best:
+    python scripts/eval/eval_colturk_checkpoint.py \
+        --checkpoints-root /content/outputs/colturk-vdr-stage1-lr5e5-sweep \
+        --max-subtasks 1 --corpus-limit 500 --output eval/results/colturk_curve.json
+This is how we pick the best model from a longer run (and which step to stop at)
+without betting on a single arbitrary checkpoint.
 """
 from __future__ import annotations
 
@@ -36,6 +44,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -224,10 +233,75 @@ def _eval_subtask(model, processor, subtask: str, batch_size: int, corpus_limit:
     return res
 
 
+def _step_of(path: Any) -> int:
+    """Extract training step from a 'checkpoint-N' dir name; -1 if none."""
+    m = re.search(r"checkpoint-(\d+)", str(path))
+    return int(m.group(1)) if m else -1
+
+
+def _eval_adapter(
+    base: str, adapter: str, subtasks: list[str], batch_size: int, corpus_limit: int | None
+) -> dict[str, Any]:
+    """Load base+adapter, eval the subtasks, free GPU, return a summary dict.
+
+    Reloads the base per call (cheap vs corpus encoding, ~30-60s) so the curve
+    loop cannot accumulate adapters or leak VRAM across checkpoints.
+    """
+    import gc
+
+    import torch
+
+    model, processor = _load_model(base, adapter)
+    results, ndcgs, recalls = [], [], []
+    for st in subtasks:
+        try:
+            r = _eval_subtask(model, processor, st, batch_size, corpus_limit)
+            results.append(r)
+            if r["ndcg_at_10"] is not None:
+                ndcgs.append(r["ndcg_at_10"])
+                recalls.append(r["recall_at_10"])
+        except Exception as exc:
+            logger.error("  %s FAILED: %s", st, exc)
+            results.append({"subtask": st, "error": str(exc)})
+
+    summary = {
+        "adapter": adapter,
+        "base": base,
+        "ndcg_at_10_mean": (sum(ndcgs) / len(ndcgs)) if ndcgs else None,
+        "recall_at_10_mean": (sum(recalls) / len(recalls)) if recalls else None,
+        "subtasks_evaluated": len(ndcgs),
+        "per_subtask": results,
+    }
+    del model, processor
+    gc.collect()
+    torch.cuda.empty_cache()
+    return summary
+
+
+def _print_single(summary: dict[str, Any], out: Path) -> None:
+    print("\n=== ColTurk-VDR ViDoRe V3 eval ===")
+    print(f"adapter: {summary['adapter']}")
+    for r in summary["per_subtask"]:
+        if r.get("ndcg_at_10") is not None:
+            print(f"  {r['subtask']}: NDCG@10={r['ndcg_at_10']:.4f} recall@10={r['recall_at_10']:.4f} (n={r['n_queries']})")
+        else:
+            print(f"  {r['subtask']}: {r.get('error', 'no relevant docs')}")
+    if summary["ndcg_at_10_mean"] is not None:
+        print(f"\nMEAN NDCG@10 ({summary['subtasks_evaluated']} subtask): {summary['ndcg_at_10_mean']:.4f}")
+    print(f"Saved -> {out}")
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
-    p = argparse.ArgumentParser(description="Eval trained ColTurk-VDR adapter on ViDoRe V3")
-    p.add_argument("--adapter", required=True, help="HF repo id or local path of trained LoRA adapter")
+    p = argparse.ArgumentParser(description="Eval trained ColTurk-VDR adapter(s) on ViDoRe V3")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--adapter", help="HF repo id or local path of ONE trained LoRA adapter")
+    src.add_argument(
+        "--checkpoints-root",
+        help="Dir containing checkpoint-*/ subdirs (a training output_dir). CURVE mode: "
+             "eval every checkpoint, emit NDCG@10-vs-step + pick the best. Each checkpoint is "
+             "independently reusable thanks to F28 (modules_to_save: custom_text_proj).",
+    )
     p.add_argument("--base", default=DEFAULT_BASE)
     p.add_argument("--subtasks", default="", help="comma list to override the 8 public subtasks")
     p.add_argument("--max-subtasks", type=int, default=0, help="limit subtask count (smoke); 0 = all")
@@ -249,41 +323,62 @@ def main() -> int:
     if args.max_subtasks:
         subtasks = subtasks[: args.max_subtasks]
 
-    model, processor = _load_model(args.base, args.adapter)
-
-    results, ndcgs = [], []
-    for st in subtasks:
-        try:
-            r = _eval_subtask(model, processor, st, args.batch_size,
-                              args.corpus_limit or None)
-            results.append(r)
-            if r["ndcg_at_10"] is not None:
-                ndcgs.append(r["ndcg_at_10"])
-        except Exception as exc:
-            logger.error("  %s FAILED: %s", st, exc)
-            results.append({"subtask": st, "error": str(exc)})
-
-    summary = {
-        "adapter": args.adapter,
-        "base": args.base,
-        "ndcg_at_10_mean": (sum(ndcgs) / len(ndcgs)) if ndcgs else None,
-        "subtasks_evaluated": len(ndcgs),
-        "per_subtask": results,
-    }
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(summary, indent=2))
+    corpus_limit = args.corpus_limit or None
 
-    print("\n=== ColTurk-VDR ViDoRe V3 eval ===")
-    print(f"adapter: {args.adapter}")
-    for r in results:
-        if r.get("ndcg_at_10") is not None:
-            print(f"  {r['subtask']}: NDCG@10={r['ndcg_at_10']:.4f} recall@10={r['recall_at_10']:.4f} (n={r['n_queries']})")
-        else:
-            print(f"  {r['subtask']}: {r.get('error', 'no relevant docs')}")
-    if summary["ndcg_at_10_mean"] is not None:
-        print(f"\nMEAN NDCG@10 ({summary['subtasks_evaluated']} subtask): {summary['ndcg_at_10_mean']:.4f}")
-    print(f"Saved → {out}")
+    # --- CURVE mode: eval every checkpoint, pick the best ---
+    if args.checkpoints_root:
+        root = Path(args.checkpoints_root)
+        ckpts = sorted((p for p in root.glob("checkpoint-*") if p.is_dir()), key=_step_of)
+        if not ckpts and (root / "adapter_config.json").exists():
+            ckpts = [root]  # root itself is a single adapter
+        if not ckpts:
+            raise SystemExit(f"No checkpoint-*/ dirs (or adapter) under {root}")
+
+        curve = []
+        for ck in ckpts:
+            step = _step_of(ck)
+            logger.info("### checkpoint step=%s (%s) ###", step, ck)
+            s = _eval_adapter(args.base, str(ck), subtasks, args.batch_size, corpus_limit)
+            curve.append({
+                "step": step,
+                "checkpoint": str(ck),
+                "ndcg_at_10_mean": s["ndcg_at_10_mean"],
+                "recall_at_10_mean": s["recall_at_10_mean"],
+                "subtasks_evaluated": s["subtasks_evaluated"],
+                "per_subtask": s["per_subtask"],
+            })
+
+        scored = [c for c in curve if c["ndcg_at_10_mean"] is not None]
+        best = max(scored, key=lambda c: c["ndcg_at_10_mean"]) if scored else None
+        report = {
+            "mode": "curve",
+            "base": args.base,
+            "checkpoints_root": str(root),
+            "subtasks": subtasks,
+            "corpus_limit": args.corpus_limit,
+            "best": {"step": best["step"], "ndcg_at_10_mean": best["ndcg_at_10_mean"]} if best else None,
+            "curve": curve,
+        }
+        out.write_text(json.dumps(report, indent=2))
+
+        print("\n=== ColTurk-VDR checkpoint CURVE (ViDoRe V3) ===")
+        print(f"{'step':>8} | {'NDCG@10':>8} | {'recall@10':>9}")
+        print(f"{'-'*8}-+-{'-'*8}-+-{'-'*9}")
+        for c in curve:
+            nd = f"{c['ndcg_at_10_mean']:.4f}" if c["ndcg_at_10_mean"] is not None else "  n/a "
+            rc = f"{c['recall_at_10_mean']:.4f}" if c["recall_at_10_mean"] is not None else "  n/a "
+            print(f"{c['step']:>8} | {nd:>8} | {rc:>9}")
+        if best:
+            print(f"\nBEST: checkpoint-{best['step']}  NDCG@10={best['ndcg_at_10_mean']:.4f}")
+        print(f"Saved -> {out}")
+        return 0
+
+    # --- SINGLE mode ---
+    summary = _eval_adapter(args.base, args.adapter, subtasks, args.batch_size, corpus_limit)
+    out.write_text(json.dumps(summary, indent=2))
+    _print_single(summary, out)
     return 0
 
 
