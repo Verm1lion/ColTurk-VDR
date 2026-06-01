@@ -48,7 +48,17 @@ def main() -> int:
         help="HF repo id to push the trained adapter to after training "
              "(e.g. Verm1ion/ColTurk-VDR-Stage1-val-lr5e5). S49 persistence fix — "
              "Colab /content is ephemeral; without this the adapter is lost on disconnect. "
-             "Uses HF_TOKEN env. Private repo. Skipped for --dry-run/--smoke-step.",
+             "Uses HF_TOKEN env. Private repo. Skipped for --dry-run/--smoke-step. "
+             "Stage-1: with this set, an on_save callback also pushes EACH checkpoint "
+             "during training (multi-session resume safety).",
+    )
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        default="",
+        help="Local checkpoint dir to resume from (e.g. /content/outputs/colturk-vdr-stage1/"
+             "checkpoint-500). Stage-1 multi-session: notebook downloads the latest checkpoint-N "
+             "from HF and passes it here so the LR schedule + optimizer continue. Empty = fresh "
+             "start. Skipped for --dry-run/--smoke-step.",
     )
     args = parser.parse_args()
 
@@ -196,6 +206,70 @@ def main() -> int:
         cfg.tr_args.save_steps = 1          # F26 pre-flight: validate save path (real run saves @ step 500)
         cfg.tr_args.report_to = []
         cfg.tr_args.logging_steps = 1
+
+    # Stage-1 multi-session: resume + during-training checkpoint push to HF.
+    # Real run only (dry-run/smoke skip). Same monkey-patch pattern as F23/F24 — wraps the inner
+    # ContrastiveTrainer.train (ColModelTraining.train() creates it and calls .train() with no args,
+    # so we inject resume_from_checkpoint + register the on_save push callback here).
+    if not args.dry_run and not args.smoke_step and (args.resume_from_checkpoint or args.push_to_hub):
+        from transformers import TrainerCallback
+
+        class _HFCheckpointPushCallback(TrainerCallback):
+            """on_save → upload newest checkpoint-N/ to HF (own subfolder). A dying Colab session
+            then leaves the latest FULL checkpoint (optimizer/scheduler/rng incl.) on HF for
+            next-session resume. upload_folder proven in validation push."""
+
+            def __init__(self, repo_id: str, output_dir: str):
+                self.repo_id = repo_id
+                self.output_dir = output_dir
+                self._api = None
+
+            def on_save(self, _args, _state, _control, **_kw):
+                from pathlib import Path as _P
+
+                from huggingface_hub import HfApi
+
+                ckpts = sorted(
+                    _P(self.output_dir).glob("checkpoint-*"),
+                    key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else -1,
+                )
+                if not ckpts:
+                    return
+                latest = ckpts[-1]
+                try:
+                    if self._api is None:
+                        self._api = HfApi(token=os.environ.get("HF_TOKEN"))
+                        self._api.create_repo(self.repo_id, repo_type="model", private=True, exist_ok=True)
+                    self._api.upload_folder(
+                        folder_path=str(latest),
+                        repo_id=self.repo_id,
+                        repo_type="model",
+                        path_in_repo=latest.name,
+                    )
+                    logger.info("on_save: pushed %s -> %s", latest.name, self.repo_id)
+                except Exception as exc:  # noqa: BLE001 — push failure must not kill training
+                    logger.error("on_save push FAILED (%s) — local checkpoint kept at %s", exc, latest)
+
+        from colpali_engine.trainer.contrastive_trainer import ContrastiveTrainer
+
+        _orig_ct_train = ContrastiveTrainer.train
+        _resume_ckpt = args.resume_from_checkpoint or None
+        _push_repo = args.push_to_hub or None
+        _out_dir = str(cfg.output_dir)
+
+        def _stage1_train(self, *a, **kw):
+            if _resume_ckpt and kw.get("resume_from_checkpoint") is None:
+                kw["resume_from_checkpoint"] = _resume_ckpt
+                logger.info("Resuming training from checkpoint: %s", _resume_ckpt)
+            if _push_repo:
+                self.add_callback(_HFCheckpointPushCallback(_push_repo, _out_dir))
+                logger.info("on_save HF-push callback registered -> %s", _push_repo)
+            return _orig_ct_train(self, *a, **kw)
+
+        ContrastiveTrainer.train = _stage1_train
+        logger.info(
+            "Stage-1 patch applied: resume=%s, during-train push=%s", _resume_ckpt, _push_repo
+        )
 
     trainer = ColModelTraining(cfg)
 
