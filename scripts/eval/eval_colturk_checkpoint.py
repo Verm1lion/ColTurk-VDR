@@ -137,12 +137,14 @@ def _encode_images(model, processor, images: list, batch_size: int) -> list:
     return embs
 
 
-def _encode_queries(model, processor, queries: list[str], batch_size: int) -> list:
+def _encode_queries(model, processor, queries: list[str], batch_size: int, max_length: int = 128) -> list:
     import torch
 
     embs: list = []
     for i in range(0, len(queries), batch_size):
-        batch = processor.process_queries(queries[i : i + batch_size]).to(model.device)
+        # max_length: ColQwen3Processor default is 50, which silently truncates verbose
+        # ViDoRe V3 queries and degrades NDCG. 128 covers them without truncation.
+        batch = processor.process_queries(queries[i : i + batch_size], max_length=max_length).to(model.device)
         with torch.no_grad():
             out = model(**batch)
         mask = batch.get("attention_mask")
@@ -176,7 +178,10 @@ def _maxsim_scores(processor, query_embs: list, doc_embs: list):
     return scores
 
 
-def _eval_subtask(model, processor, subtask: str, batch_size: int, corpus_limit: int | None) -> dict[str, Any]:
+def _eval_subtask(
+    model, processor, subtask: str, batch_size: int,
+    corpus_limit: int | None, query_limit: int | None = None,
+) -> dict[str, Any]:
     from datasets import load_dataset
 
     logger.info("=== %s ===", subtask)
@@ -184,29 +189,57 @@ def _eval_subtask(model, processor, subtask: str, batch_size: int, corpus_limit:
     queries = load_dataset(subtask, "queries", split="test")
     qrels = load_dataset(subtask, "qrels", split="test")
 
+    all_q_ids = [int(r) for r in queries["query_id"]]
+    all_q_texts = list(queries["query"])
+
+    # rel from the FULL qrels (before any corpus subsetting) → {query_id: {corpus_id: grade}}
+    rel_full: dict[int, dict[int, int]] = {}
+    for qid, cid, score in zip(qrels["query_id"], qrels["corpus_id"], qrels["score"]):
+        rel_full.setdefault(int(qid), {})[int(cid)] = int(score)
+
+    # Query subset: only queries that HAVE qrels; cap by query_limit (smoke).
+    sel_idx = [i for i, qid in enumerate(all_q_ids) if rel_full.get(qid)]
+    if query_limit:
+        sel_idx = sel_idx[:query_limit]
+    if not sel_idx:
+        logger.warning("  no queries with qrels — skipping")
+        return {"subtask": subtask, "ndcg_at_10": None, "recall_at_10": None, "n_queries": 0}
+    sel_qids = [all_q_ids[i] for i in sel_idx]
+    sel_qtexts = [all_q_texts[i] for i in sel_idx]
+
+    # GOLD-AWARE corpus subsetting (fixes the "first-N rows miss every gold doc" trap):
+    # keep ALL gold docs for the selected queries, then fill with other docs up to the
+    # limit so every evaluated query is answerable among `corpus_limit` real distractors.
+    # corpus_limit=None → full corpus (true ranking over everything).
     if corpus_limit:
-        corpus = corpus.select(range(min(corpus_limit, len(corpus))))
+        gold = set()
+        for qid in sel_qids:
+            gold.update(rel_full[qid].keys())
+        keep_cids = set(gold)
+        for cid in corpus["corpus_id"]:
+            if len(keep_cids) >= corpus_limit:
+                break
+            keep_cids.add(int(cid))
+        idx_keep = [i for i, cid in enumerate(corpus["corpus_id"]) if int(cid) in keep_cids]
+        corpus = corpus.select(idx_keep)
+        logger.info("  corpus subset: %d gold + filler = %d docs (limit=%d)", len(gold), len(corpus), corpus_limit)
 
     corpus_ids = [int(r) for r in corpus["corpus_id"]]
     cid_to_idx = {cid: i for i, cid in enumerate(corpus_ids)}
     images = corpus["image"]
-    q_ids = [int(r) for r in queries["query_id"]]
-    q_texts = list(queries["query"])
 
-    # qrels → {query_id: {corpus_id: grade}}, only for corpus we kept
+    # rel restricted to kept corpus, for the selected queries only
     rel: dict[int, dict[int, int]] = {}
-    for qid, cid, score in zip(qrels["query_id"], qrels["corpus_id"], qrels["score"]):
-        cid = int(cid)
-        if cid not in cid_to_idx:
-            continue
-        rel.setdefault(int(qid), {})[cid] = int(score)
-    # keep only queries that have at least one relevant doc within kept corpus
-    keep = [i for i, qid in enumerate(q_ids) if rel.get(qid)]
+    for qid in sel_qids:
+        kept = {cid: g for cid, g in rel_full[qid].items() if cid in cid_to_idx}
+        if kept:
+            rel[qid] = kept
+    keep = [i for i, qid in enumerate(sel_qids) if qid in rel]
     if not keep:
-        logger.warning("  no queries with relevant docs in kept corpus — skipping")
+        logger.warning("  no selected queries have gold in kept corpus — skipping")
         return {"subtask": subtask, "ndcg_at_10": None, "recall_at_10": None, "n_queries": 0}
-    q_ids = [q_ids[i] for i in keep]
-    q_texts = [q_texts[i] for i in keep]
+    q_ids = [sel_qids[i] for i in keep]
+    q_texts = [sel_qtexts[i] for i in keep]
 
     logger.info("  corpus=%d queries=%d", len(images), len(q_texts))
     t0 = time.time()
@@ -240,7 +273,8 @@ def _step_of(path: Any) -> int:
 
 
 def _eval_adapter(
-    base: str, adapter: str, subtasks: list[str], batch_size: int, corpus_limit: int | None
+    base: str, adapter: str, subtasks: list[str], batch_size: int,
+    corpus_limit: int | None, query_limit: int | None = None,
 ) -> dict[str, Any]:
     """Load base+adapter, eval the subtasks, free GPU, return a summary dict.
 
@@ -255,7 +289,7 @@ def _eval_adapter(
     results, ndcgs, recalls = [], [], []
     for st in subtasks:
         try:
-            r = _eval_subtask(model, processor, st, batch_size, corpus_limit)
+            r = _eval_subtask(model, processor, st, batch_size, corpus_limit, query_limit)
             results.append(r)
             if r["ndcg_at_10"] is not None:
                 ndcgs.append(r["ndcg_at_10"])
@@ -305,7 +339,12 @@ def main() -> int:
     p.add_argument("--base", default=DEFAULT_BASE)
     p.add_argument("--subtasks", default="", help="comma list to override the 8 public subtasks")
     p.add_argument("--max-subtasks", type=int, default=0, help="limit subtask count (smoke); 0 = all")
-    p.add_argument("--corpus-limit", type=int, default=0, help="cap corpus per subtask (smoke); 0 = full")
+    p.add_argument("--corpus-limit", type=int, default=0,
+                   help="cap corpus per subtask (smoke): keeps all gold docs for the selected "
+                        "queries + filler up to this many; 0 = full corpus (true ranking)")
+    p.add_argument("--query-limit", type=int, default=0,
+                   help="cap evaluated queries per subtask (smoke); 0 = all queries with qrels. "
+                        "Set this WITH --corpus-limit for a meaningful smoke (else gold-union ~= full corpus)")
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--output", default="eval/results/colturk_v3_eval.json")
     args = p.parse_args()
@@ -326,6 +365,7 @@ def main() -> int:
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     corpus_limit = args.corpus_limit or None
+    query_limit = args.query_limit or None
 
     # --- CURVE mode: eval every checkpoint, pick the best ---
     if args.checkpoints_root:
@@ -340,7 +380,7 @@ def main() -> int:
         for ck in ckpts:
             step = _step_of(ck)
             logger.info("### checkpoint step=%s (%s) ###", step, ck)
-            s = _eval_adapter(args.base, str(ck), subtasks, args.batch_size, corpus_limit)
+            s = _eval_adapter(args.base, str(ck), subtasks, args.batch_size, corpus_limit, query_limit)
             curve.append({
                 "step": step,
                 "checkpoint": str(ck),
@@ -358,6 +398,7 @@ def main() -> int:
             "checkpoints_root": str(root),
             "subtasks": subtasks,
             "corpus_limit": args.corpus_limit,
+            "query_limit": args.query_limit,
             "best": {"step": best["step"], "ndcg_at_10_mean": best["ndcg_at_10_mean"]} if best else None,
             "curve": curve,
         }
@@ -376,7 +417,7 @@ def main() -> int:
         return 0
 
     # --- SINGLE mode ---
-    summary = _eval_adapter(args.base, args.adapter, subtasks, args.batch_size, corpus_limit)
+    summary = _eval_adapter(args.base, args.adapter, subtasks, args.batch_size, corpus_limit, query_limit)
     out.write_text(json.dumps(summary, indent=2))
     _print_single(summary, out)
     return 0
