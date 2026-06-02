@@ -1,4 +1,4 @@
-"""Evaluate a TRAINED ColTurk-VDR LoRA checkpoint on ViDoRe V3 (NDCG@10).
+"""Evaluate a TRAINED ColTurk-VDR LoRA checkpoint on ViDoRe V3 (NDCG@5/@10).
 
 This is the eval harness that was MISSING — baseline_zeroshot.py only does
 zero-shot baselines via mteb.evaluate (the Day-1 F6/F7 fragile path). Here we
@@ -20,20 +20,32 @@ ViDoRe V3 schema (HF, verified 2026-05-29):
 SMOKE DISCIPLINE: run --max-subtasks 1 (+ optional --corpus-limit) first to
 validate the pipeline in ~10-20 min before the full 8-subtask sweep.
 
+S52 VALIDITY MODE (scientific defensibility — flags added 2026-06-02):
+  --binarize           binarized relevance (grade>0 -> 1); leaderboard reports this too (S52-C8)
+  --bootstrap 1000     percentile 95% CI over per-query NDCG (S52-C9)
+  --no-adapter         eval RAW base (no LoRA; custom_text_proj random) -> ~floor NDCG.
+                       Causal control: proves training moved NDCG floor->Y (S52-D10).
+  --max-visual-tokens 768   cap doc visual tokens to match TRAINING (768); 0 = processor
+                       default = leaderboard-style. Run both for the 768-vs-default A/B (S52-E).
+  (full-corpus = omit --corpus-limit  ->  true ranking over the whole subtask corpus, S52-C7)
+
 Run (Colab, after rescuing the adapter to HF Hub):
     python scripts/eval/eval_colturk_checkpoint.py \
-        --adapter Verm1lion/ColTurk-VDR-Stage1-sweep-lr5e5 \
-        --max-subtasks 1 --corpus-limit 500 --output eval/results/colturk_lr5e5_smoke.json
-Then full:
+        --adapter Verm1ion/ColTurk-VDR-Stage1 --subtasks vidore/vidore_v3_finance_en \
+        --corpus-limit 500 --query-limit 100 --output eval/results/smoke.json
+Full-corpus official number (leaderboard-comparable) + validity:
     python scripts/eval/eval_colturk_checkpoint.py \
-        --adapter Verm1lion/ColTurk-VDR-Stage1-sweep-lr5e5 \
-        --output eval/results/colturk_lr5e5_v3.json
+        --adapter /content/outputs/colturk-vdr-stage1/checkpoint-500 \
+        --bootstrap 1000 --output eval/results/colturk_stage1_full.json
+Base control (floor):
+    python scripts/eval/eval_colturk_checkpoint.py \
+        --no-adapter --query-limit 100 --output eval/results/base_control.json
 
 CURVE mode (find the best checkpoint along a run's trajectory) — eval every
 checkpoint-N/ under a local training output_dir, emit NDCG@10-vs-step + the best:
     python scripts/eval/eval_colturk_checkpoint.py \
-        --checkpoints-root /content/outputs/colturk-vdr-stage1-lr5e5-sweep \
-        --max-subtasks 1 --corpus-limit 500 --output eval/results/colturk_curve.json
+        --checkpoints-root /content/outputs/colturk-vdr-stage1 \
+        --corpus-limit 500 --query-limit 100 --output eval/results/curve.json
 This is how we pick the best model from a longer run (and which step to stop at)
 without betting on a single arbitrary checkpoint.
 """
@@ -44,6 +56,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import time
 from pathlib import Path
@@ -66,6 +79,10 @@ V3_PUBLIC_SUBTASKS: tuple[str, ...] = (
 DEFAULT_BASE = "Qwen/Qwen3-VL-4B-Instruct"
 
 
+def _mean(xs: list[float]) -> float:
+    return (sum(xs) / len(xs)) if xs else 0.0
+
+
 def _ndcg_at_k(ranked_corpus_ids: list[int], rel: dict[int, int], k: int = 10) -> float:
     """NDCG@k. ranked_corpus_ids = docs sorted by score desc. rel = {corpus_id: grade}."""
     dcg = 0.0
@@ -86,12 +103,33 @@ def _recall_at_k(ranked_corpus_ids: list[int], rel: dict[int, int], k: int = 10)
     return len(topk & relevant) / len(relevant)
 
 
-def _load_model(base: str, adapter: str):
-    """ColQwen3 base + LoRA adapter (PeftModel) + ColQwen3Processor.
+def _bootstrap_ci(values: list[float], n_boot: int, seed: int = 42, alpha: float = 0.05) -> list[float]:
+    """Percentile bootstrap [lo, hi] for the MEAN of per-query scores (S52-C9).
 
-    adapter = HF repo id OR local path. If the adapter dir/repo already contains
-    a full merged model it still loads; PeftModel.from_pretrained handles the
-    adapter-on-base case (our sweep output).
+    Seeded (42) so the CI is reproducible. O(n_boot * n) — fine for n up to a few k.
+    """
+    if not values or n_boot <= 0:
+        return [round(_mean(values), 4), round(_mean(values), 4)]
+    rng = random.Random(seed)
+    n = len(values)
+    means = []
+    for _ in range(n_boot):
+        s = 0.0
+        for _ in range(n):
+            s += values[rng.randrange(n)]
+        means.append(s / n)
+    means.sort()
+    lo = means[min(n_boot - 1, int((alpha / 2) * n_boot))]
+    hi = means[min(n_boot - 1, int((1 - alpha / 2) * n_boot))]
+    return [round(lo, 4), round(hi, 4)]
+
+
+def _load_model(base: str, adapter: str | None, max_visual_tokens: int | None = None):
+    """ColQwen3 base (+ optional LoRA adapter) + ColQwen3Processor.
+
+    adapter = HF repo id OR local path. If None -> NO-ADAPTER base control: raw base
+    with a RANDOM-init custom_text_proj head -> ~floor NDCG (S52-D10 causal control).
+    max_visual_tokens: cap doc visual tokens (768 = train-match; None = processor default).
     """
     import torch
     from colpali_engine.models import ColQwen3, ColQwen3Processor
@@ -104,15 +142,27 @@ def _load_model(base: str, adapter: str):
         attn_implementation="sdpa",
     ).eval()
 
-    logger.info("Attaching LoRA adapter: %s", adapter)
-    from peft import PeftModel
+    if adapter:
+        logger.info("Attaching LoRA adapter: %s", adapter)
+        from peft import PeftModel
 
-    model = PeftModel.from_pretrained(model, adapter).eval()
+        model = PeftModel.from_pretrained(model, adapter).eval()
+    else:
+        logger.warning(
+            "NO-ADAPTER base control: raw base, custom_text_proj is RANDOM-init "
+            "-> embeddings ~meaningless -> floor NDCG expected (this is the causal control)."
+        )
+
+    proc_kwargs: dict[str, Any] = {}
+    if max_visual_tokens:
+        proc_kwargs["max_num_visual_tokens"] = max_visual_tokens
+        logger.info("Processor max_num_visual_tokens=%d (train-match)", max_visual_tokens)
     # Processor: prefer adapter repo (may carry processor config), fall back to base
+    proc_src = adapter if adapter else base
     try:
-        processor = ColQwen3Processor.from_pretrained(adapter)
+        processor = ColQwen3Processor.from_pretrained(proc_src, **proc_kwargs)
     except Exception:
-        processor = ColQwen3Processor.from_pretrained(base)
+        processor = ColQwen3Processor.from_pretrained(base, **proc_kwargs)
     return model, processor
 
 
@@ -181,6 +231,7 @@ def _maxsim_scores(processor, query_embs: list, doc_embs: list):
 def _eval_subtask(
     model, processor, subtask: str, batch_size: int,
     corpus_limit: int | None, query_limit: int | None = None,
+    binarize: bool = False, bootstrap: int = 0,
 ) -> dict[str, Any]:
     from datasets import load_dataset
 
@@ -210,7 +261,7 @@ def _eval_subtask(
     # GOLD-AWARE corpus subsetting (fixes the "first-N rows miss every gold doc" trap):
     # keep ALL gold docs for the selected queries, then fill with other docs up to the
     # limit so every evaluated query is answerable among `corpus_limit` real distractors.
-    # corpus_limit=None → full corpus (true ranking over everything).
+    # corpus_limit=None → full corpus (true ranking over everything, S52-C7).
     if corpus_limit:
         gold = set()
         for qid in sel_qids:
@@ -241,28 +292,44 @@ def _eval_subtask(
     q_ids = [sel_qids[i] for i in keep]
     q_texts = [sel_qtexts[i] for i in keep]
 
-    logger.info("  corpus=%d queries=%d", len(images), len(q_texts))
+    # Binarized relevance (S52-C8): collapse graded scores to 1 (relevant/not).
+    if binarize:
+        rel = {qid: {cid: 1 for cid in d} for qid, d in rel.items()}
+
+    logger.info("  corpus=%d queries=%d binarize=%s", len(images), len(q_texts), binarize)
     t0 = time.time()
     doc_embs = _encode_images(model, processor, images, batch_size)
     query_embs = _encode_queries(model, processor, q_texts, batch_size)
     scores = _maxsim_scores(processor, query_embs, doc_embs)
     logger.info("  encoded+scored in %.1fs", time.time() - t0)
 
-    ndcgs, recalls = [], []
+    ndcg10, ndcg5, rec10, rec5 = [], [], [], []
     for qi, qid in enumerate(q_ids):
         order = scores[qi].argsort(descending=True).tolist()
         ranked_cids = [corpus_ids[j] for j in order]
-        ndcgs.append(_ndcg_at_k(ranked_cids, rel[qid], 10))
-        recalls.append(_recall_at_k(ranked_cids, rel[qid], 10))
+        ndcg10.append(_ndcg_at_k(ranked_cids, rel[qid], 10))
+        ndcg5.append(_ndcg_at_k(ranked_cids, rel[qid], 5))
+        rec10.append(_recall_at_k(ranked_cids, rel[qid], 10))
+        rec5.append(_recall_at_k(ranked_cids, rel[qid], 5))
 
-    res = {
+    res: dict[str, Any] = {
         "subtask": subtask,
-        "ndcg_at_10": sum(ndcgs) / len(ndcgs),
-        "recall_at_10": sum(recalls) / len(recalls),
+        "ndcg_at_10": _mean(ndcg10),
+        "ndcg_at_5": _mean(ndcg5),
+        "recall_at_10": _mean(rec10),
+        "recall_at_5": _mean(rec5),
         "n_queries": len(q_ids),
         "n_corpus": len(images),
+        "binarized": binarize,
     }
-    logger.info("  NDCG@10=%.4f recall@10=%.4f (n=%d)", res["ndcg_at_10"], res["recall_at_10"], len(q_ids))
+    if bootstrap:
+        res["ndcg_at_10_ci95"] = _bootstrap_ci(ndcg10, bootstrap)
+        res["ndcg_at_5_ci95"] = _bootstrap_ci(ndcg5, bootstrap)
+    logger.info(
+        "  NDCG@10=%.4f NDCG@5=%.4f recall@10=%.4f (n=%d)%s",
+        res["ndcg_at_10"], res["ndcg_at_5"], res["recall_at_10"], len(q_ids),
+        f" CI95={res['ndcg_at_10_ci95']}" if bootstrap else "",
+    )
     return res
 
 
@@ -273,37 +340,43 @@ def _step_of(path: Any) -> int:
 
 
 def _eval_adapter(
-    base: str, adapter: str, subtasks: list[str], batch_size: int,
+    base: str, adapter: str | None, subtasks: list[str], batch_size: int,
     corpus_limit: int | None, query_limit: int | None = None,
+    binarize: bool = False, bootstrap: int = 0, max_visual_tokens: int | None = None,
 ) -> dict[str, Any]:
-    """Load base+adapter, eval the subtasks, free GPU, return a summary dict.
+    """Load base(+adapter), eval the subtasks, free GPU, return a summary dict.
 
     Reloads the base per call (cheap vs corpus encoding, ~30-60s) so the curve
     loop cannot accumulate adapters or leak VRAM across checkpoints.
+    adapter=None -> NO-ADAPTER base control (S52-D10).
     """
     import gc
 
     import torch
 
-    model, processor = _load_model(base, adapter)
-    results, ndcgs, recalls = [], [], []
+    model, processor = _load_model(base, adapter, max_visual_tokens)
+    results, ndcg10s, ndcg5s, recalls = [], [], [], []
     for st in subtasks:
         try:
-            r = _eval_subtask(model, processor, st, batch_size, corpus_limit, query_limit)
+            r = _eval_subtask(model, processor, st, batch_size, corpus_limit, query_limit, binarize, bootstrap)
             results.append(r)
             if r["ndcg_at_10"] is not None:
-                ndcgs.append(r["ndcg_at_10"])
+                ndcg10s.append(r["ndcg_at_10"])
+                ndcg5s.append(r["ndcg_at_5"])
                 recalls.append(r["recall_at_10"])
         except Exception as exc:
             logger.error("  %s FAILED: %s", st, exc)
             results.append({"subtask": st, "error": str(exc)})
 
     summary = {
-        "adapter": adapter,
+        "adapter": adapter if adapter else "(no-adapter base control)",
         "base": base,
-        "ndcg_at_10_mean": (sum(ndcgs) / len(ndcgs)) if ndcgs else None,
-        "recall_at_10_mean": (sum(recalls) / len(recalls)) if recalls else None,
-        "subtasks_evaluated": len(ndcgs),
+        "binarized": binarize,
+        "max_visual_tokens": max_visual_tokens or "processor-default",
+        "ndcg_at_10_mean": (_mean(ndcg10s)) if ndcg10s else None,
+        "ndcg_at_5_mean": (_mean(ndcg5s)) if ndcg5s else None,
+        "recall_at_10_mean": (_mean(recalls)) if recalls else None,
+        "subtasks_evaluated": len(ndcg10s),
         "per_subtask": results,
     }
     del model, processor
@@ -315,13 +388,21 @@ def _eval_adapter(
 def _print_single(summary: dict[str, Any], out: Path) -> None:
     print("\n=== ColTurk-VDR ViDoRe V3 eval ===")
     print(f"adapter: {summary['adapter']}")
+    print(f"binarized={summary['binarized']}  max_visual_tokens={summary['max_visual_tokens']}")
     for r in summary["per_subtask"]:
         if r.get("ndcg_at_10") is not None:
-            print(f"  {r['subtask']}: NDCG@10={r['ndcg_at_10']:.4f} recall@10={r['recall_at_10']:.4f} (n={r['n_queries']})")
+            ci = f" CI95={r['ndcg_at_10_ci95']}" if "ndcg_at_10_ci95" in r else ""
+            print(
+                f"  {r['subtask']}: NDCG@10={r['ndcg_at_10']:.4f} NDCG@5={r['ndcg_at_5']:.4f} "
+                f"recall@10={r['recall_at_10']:.4f} (n={r['n_queries']}){ci}"
+            )
         else:
             print(f"  {r['subtask']}: {r.get('error', 'no relevant docs')}")
     if summary["ndcg_at_10_mean"] is not None:
-        print(f"\nMEAN NDCG@10 ({summary['subtasks_evaluated']} subtask): {summary['ndcg_at_10_mean']:.4f}")
+        print(
+            f"\nMEAN NDCG@10 ({summary['subtasks_evaluated']} subtask): {summary['ndcg_at_10_mean']:.4f}"
+            f"  | NDCG@5: {summary['ndcg_at_5_mean']:.4f}"
+        )
     print(f"Saved -> {out}")
 
 
@@ -336,16 +417,28 @@ def main() -> int:
              "eval every checkpoint, emit NDCG@10-vs-step + pick the best. Each checkpoint is "
              "independently reusable thanks to F28 (modules_to_save: custom_text_proj).",
     )
+    src.add_argument(
+        "--no-adapter",
+        action="store_true",
+        help="BASE CONTROL: eval RAW base (no LoRA); custom_text_proj is random-init -> ~floor "
+             "NDCG. Causal proof that training moved the metric (S52-D10).",
+    )
     p.add_argument("--base", default=DEFAULT_BASE)
     p.add_argument("--subtasks", default="", help="comma list to override the 8 public subtasks")
     p.add_argument("--max-subtasks", type=int, default=0, help="limit subtask count (smoke); 0 = all")
     p.add_argument("--corpus-limit", type=int, default=0,
                    help="cap corpus per subtask (smoke): keeps all gold docs for the selected "
-                        "queries + filler up to this many; 0 = full corpus (true ranking)")
+                        "queries + filler up to this many; 0 = full corpus (true ranking, S52-C7)")
     p.add_argument("--query-limit", type=int, default=0,
                    help="cap evaluated queries per subtask (smoke); 0 = all queries with qrels. "
                         "Set this WITH --corpus-limit for a meaningful smoke (else gold-union ~= full corpus)")
     p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument("--binarize", action="store_true",
+                   help="binarized relevance (grade>0 -> 1); leaderboard reports this too (S52-C8)")
+    p.add_argument("--bootstrap", type=int, default=0,
+                   help="bootstrap resamples for a seeded 95%% CI over per-query NDCG (e.g. 1000); 0 = off (S52-C9)")
+    p.add_argument("--max-visual-tokens", type=int, default=0,
+                   help="cap doc visual tokens (768 = train-match; 0 = processor default = leaderboard-style). S52-E")
     p.add_argument("--output", default="eval/results/colturk_v3_eval.json")
     args = p.parse_args()
 
@@ -366,11 +459,14 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     corpus_limit = args.corpus_limit or None
     query_limit = args.query_limit or None
+    max_vt = args.max_visual_tokens or None
+    binarize = args.binarize
+    bootstrap = args.bootstrap
 
     # --- CURVE mode: eval every checkpoint, pick the best ---
     if args.checkpoints_root:
         root = Path(args.checkpoints_root)
-        ckpts = sorted((p for p in root.glob("checkpoint-*") if p.is_dir()), key=_step_of)
+        ckpts = sorted((c for c in root.glob("checkpoint-*") if c.is_dir()), key=_step_of)
         if not ckpts and (root / "adapter_config.json").exists():
             ckpts = [root]  # root itself is a single adapter
         if not ckpts:
@@ -380,11 +476,13 @@ def main() -> int:
         for ck in ckpts:
             step = _step_of(ck)
             logger.info("### checkpoint step=%s (%s) ###", step, ck)
-            s = _eval_adapter(args.base, str(ck), subtasks, args.batch_size, corpus_limit, query_limit)
+            s = _eval_adapter(args.base, str(ck), subtasks, args.batch_size, corpus_limit,
+                              query_limit, binarize, bootstrap, max_vt)
             curve.append({
                 "step": step,
                 "checkpoint": str(ck),
                 "ndcg_at_10_mean": s["ndcg_at_10_mean"],
+                "ndcg_at_5_mean": s["ndcg_at_5_mean"],
                 "recall_at_10_mean": s["recall_at_10_mean"],
                 "subtasks_evaluated": s["subtasks_evaluated"],
                 "per_subtask": s["per_subtask"],
@@ -399,25 +497,30 @@ def main() -> int:
             "subtasks": subtasks,
             "corpus_limit": args.corpus_limit,
             "query_limit": args.query_limit,
+            "binarized": binarize,
+            "max_visual_tokens": max_vt or "processor-default",
             "best": {"step": best["step"], "ndcg_at_10_mean": best["ndcg_at_10_mean"]} if best else None,
             "curve": curve,
         }
         out.write_text(json.dumps(report, indent=2))
 
         print("\n=== ColTurk-VDR checkpoint CURVE (ViDoRe V3) ===")
-        print(f"{'step':>8} | {'NDCG@10':>8} | {'recall@10':>9}")
-        print(f"{'-'*8}-+-{'-'*8}-+-{'-'*9}")
+        print(f"{'step':>8} | {'NDCG@10':>8} | {'NDCG@5':>8} | {'recall@10':>9}")
+        print(f"{'-'*8}-+-{'-'*8}-+-{'-'*8}-+-{'-'*9}")
         for c in curve:
             nd = f"{c['ndcg_at_10_mean']:.4f}" if c["ndcg_at_10_mean"] is not None else "  n/a "
+            n5 = f"{c['ndcg_at_5_mean']:.4f}" if c["ndcg_at_5_mean"] is not None else "  n/a "
             rc = f"{c['recall_at_10_mean']:.4f}" if c["recall_at_10_mean"] is not None else "  n/a "
-            print(f"{c['step']:>8} | {nd:>8} | {rc:>9}")
+            print(f"{c['step']:>8} | {nd:>8} | {n5:>8} | {rc:>9}")
         if best:
             print(f"\nBEST: checkpoint-{best['step']}  NDCG@10={best['ndcg_at_10_mean']:.4f}")
         print(f"Saved -> {out}")
         return 0
 
-    # --- SINGLE mode ---
-    summary = _eval_adapter(args.base, args.adapter, subtasks, args.batch_size, corpus_limit, query_limit)
+    # --- SINGLE mode (--adapter, or --no-adapter base control) ---
+    adapter = None if args.no_adapter else args.adapter
+    summary = _eval_adapter(args.base, adapter, subtasks, args.batch_size, corpus_limit,
+                            query_limit, binarize, bootstrap, max_vt)
     out.write_text(json.dumps(summary, indent=2))
     _print_single(summary, out)
     return 0
