@@ -68,7 +68,7 @@ config:
     bf16: true
     optim: "adamw_torch"                     # S37 (paged_adamw_8bit DEĞİL — maintainer)
     save_strategy: "steps"
-    save_steps: 250                          # curve checkpoint'leri + resume noktaları
+    save_steps: 125                          # curve checkpoint'leri + resume noktaları (~1.4h aralık; bounded-session güvenli)
     save_total_limit: 3                      # local disk bounded; her checkpoint on_save ile HF'e push'lanır (hepsi HF'te kalır)
     eval_strategy: "no"                      # run_eval=false ile uyum
     logging_steps: 10
