@@ -2,14 +2,16 @@
 
 Step-by-step submission of `Verm1ion/ColTurk-VDR-Qwen3VL-4B-v1.0` (NDCG@10 0.5584, 8 public subtasks) to the MTEB ViDoRe V3 retriever leaderboard. Written so maintainers hit zero friction.
 
-## 0. Prerequisites (done)
+## 0. Prerequisites (ALL DONE 2026-06-11)
 - [x] GitHub repo public + clean history: https://github.com/Verm1lion/ColTurk-VDR
 - [x] Official eval JSONs committed under `eval/results/`
 - [x] Model card: `docs/MODEL_CARD_v1.md`
-- [ ] Merged model published → run notebook **Cell 14 (PUBLISH)** → `https://huggingface.co/Verm1ion/ColTurk-VDR-Qwen3VL-4B-v1.0` (public)
+- [x] Merged model published (smoke-load verified): https://huggingface.co/Verm1ion/ColTurk-VDR-Qwen3VL-4B-v1.0
+- [x] **MODEL COMMIT SHA (= ModelMeta `revision`): `d56c7bbc278ba2fe4ac1c255fb0e55dd46b40bad`**
+- [x] Results files generated with live mteb 2.15.3 + per-task dataset revisions, incl. `model_meta.json`: `eval/mteb_results/Verm1ion__ColTurk-VDR-Qwen3VL-4B-v1.0/d56c7bb.../`
 
 ## 1. ModelMeta PR → `embeddings-benchmark/mteb`
-Fork: `Verm1lion/mteb` (exists). Edit **`mteb/models/model_implementations/colqwen_models.py`** — append (mirrors the existing ColQwen3-family entries in that file; `ColQwen3Wrapper` is already defined there):
+Fork: `Verm1lion/mteb` (exists — **press "Sync fork" on GitHub first**, it is weeks behind upstream; branch from fresh main). Edit **`mteb/models/model_implementations/colqwen_models.py`** — append (mirrors the existing ColQwen3-family entries in that file; `ColQwen3Wrapper` is already defined there):
 
 ```python
 colturk_vdr_4b = ModelMeta(

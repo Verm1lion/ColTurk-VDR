@@ -1,0 +1,156 @@
+{
+  "adapter": "/content/ckpts/checkpoint-625",
+  "base": "Qwen/Qwen3-VL-4B-Instruct",
+  "binarized": false,
+  "max_visual_tokens": "processor-default",
+  "ndcg_at_10_mean": 0.5357470958709624,
+  "ndcg_at_5_mean": 0.5044953943624215,
+  "recall_at_10_mean": 0.594264134101678,
+  "subtasks_evaluated": 8,
+  "per_subtask": [
+    {
+      "subtask": "vidore/vidore_v3_finance_en",
+      "ndcg_at_10": 0.568578669096448,
+      "ndcg_at_5": 0.5363864271220591,
+      "recall_at_10": 0.6284247823092293,
+      "recall_at_5": 0.514263527408635,
+      "n_queries": 1854,
+      "n_corpus": 2942,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.553,
+        0.5842
+      ],
+      "ndcg_at_5_ci95": [
+        0.5205,
+        0.5522
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_finance_fr",
+      "ndcg_at_10": 0.42526985018613406,
+      "ndcg_at_5": 0.38818796092984015,
+      "recall_at_10": 0.506676857727487,
+      "recall_at_5": 0.39304693139605074,
+      "n_queries": 1920,
+      "n_corpus": 2384,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.4093,
+        0.4413
+      ],
+      "ndcg_at_5_ci95": [
+        0.3723,
+        0.4047
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_hr",
+      "ndcg_at_10": 0.5152833216503062,
+      "ndcg_at_5": 0.48576600044816853,
+      "recall_at_10": 0.5763911135285804,
+      "recall_at_5": 0.45774351052020273,
+      "n_queries": 1908,
+      "n_corpus": 1110,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.5011,
+        0.5291
+      ],
+      "ndcg_at_5_ci95": [
+        0.4714,
+        0.5008
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_industrial",
+      "ndcg_at_10": 0.44669594509184263,
+      "ndcg_at_5": 0.4236918473089384,
+      "recall_at_10": 0.4844289862434987,
+      "recall_at_5": 0.39785789052059506,
+      "n_queries": 1698,
+      "n_corpus": 5244,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.4287,
+        0.4656
+      ],
+      "ndcg_at_5_ci95": [
+        0.4056,
+        0.4431
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_computer_science",
+      "ndcg_at_10": 0.6943382666150536,
+      "ndcg_at_5": 0.6548530462659834,
+      "recall_at_10": 0.7443592217429427,
+      "recall_at_5": 0.593107153397851,
+      "n_queries": 1290,
+      "n_corpus": 1360,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.6798,
+        0.708
+      ],
+      "ndcg_at_5_ci95": [
+        0.6388,
+        0.67
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_pharmaceuticals",
+      "ndcg_at_10": 0.5909039971971844,
+      "ndcg_at_5": 0.5700311576478748,
+      "recall_at_10": 0.6336865521577891,
+      "recall_at_5": 0.5349870881429156,
+      "n_queries": 2184,
+      "n_corpus": 2313,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.5772,
+        0.6054
+      ],
+      "ndcg_at_5_ci95": [
+        0.5554,
+        0.5853
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_physics",
+      "ndcg_at_10": 0.4409526313061897,
+      "ndcg_at_5": 0.40378717340223136,
+      "recall_at_10": 0.4867167185546274,
+      "recall_at_5": 0.3493968637727301,
+      "n_queries": 1812,
+      "n_corpus": 1674,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.4264,
+        0.4551
+      ],
+      "ndcg_at_5_ci95": [
+        0.3888,
+        0.4181
+      ]
+    },
+    {
+      "subtask": "vidore/vidore_v3_energy",
+      "ndcg_at_10": 0.6039540858245406,
+      "ndcg_at_5": 0.5732595417742764,
+      "recall_at_10": 0.6934288405492692,
+      "recall_at_5": 0.5947444944944305,
+      "n_queries": 1848,
+      "n_corpus": 2225,
+      "binarized": false,
+      "ndcg_at_10_ci95": [
+        0.5886,
+        0.6186
+      ],
+      "ndcg_at_5_ci95": [
+        0.5564,
+        0.5894
+      ]
+    }
+  ]
+}
