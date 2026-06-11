@@ -1,0 +1,85 @@
+# Phase C (Orta tier) — ColTurk-VDR num_negs 2->4 probe.
+#
+# Why: Stage-1 (num_negs=2) PEAKED at ckpt-1000 = NDCG@10 0.5584, then ckpt-1500 regressed
+# to 0.5518 (overfitting onset, S52 lockstep tripwire). To raise the PEAK (not just train longer),
+# the highest-confidence lever is MORE/harder negatives. load_train_set_ir already slices
+# negative_passages[:num_negs] from ColPali's own mined negatives, so num_negs=4 is a one-field
+# change (no custom mining pipeline needed). Verified gain (research): +0.8-1.5 standalone.
+#
+# Run = FRESH from raw Qwen3-VL-4B (not resumed from ckpt-1000 — we want a clean PEAK comparison,
+# not continuation of an already-near-overfit trajectory). Curve-gated: eval checkpoints around
+# the expected peak region (~750-1250), STOP at the peak — do NOT overshoot like the 1500 run.
+# Push to a SEPARATE HF repo to keep num_negs=4 checkpoints distinct from the num_negs=2 run.
+#
+# Diff vs train_colturk_stage1.yaml: num_negs 2->4, output_dir/run_name suffix. Everything else
+# identical (S46 base, S47 LR=5e-5, S37 recipe, F28 custom_text_proj). Deploy: needs to reach
+# Colab (fresh GitHub push OR manual upload — current PAT is dead).
+
+config:
+  (): colpali_engine.trainer.colmodel_training.ColModelTrainingConfig
+  output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-negs4
+
+  processor:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3Processor
+    pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
+    max_num_visual_tokens: 768
+
+  model:
+    (): colpali_engine.utils.transformers_wrappers.AllPurposeWrapper
+    class_to_instanciate: !ext colpali_engine.models.ColQwen3
+    pretrained_model_name_or_path: "Qwen/Qwen3-VL-4B-Instruct"
+    torch_dtype: !ext torch.bfloat16
+    use_cache: false
+    attn_implementation: "sdpa"
+
+  # PHASE C LEVER: num_negs 2 -> 4 (more of ColPali's own mined hard negatives per query).
+  train_dataset:
+    (): colpali_engine.utils.dataset_transformation.load_train_set_ir
+    num_negs: 4
+
+  run_train: true
+  run_eval: false
+
+  loss_func:
+    (): colpali_engine.loss.late_interaction_losses.ColbertPairwiseNegativeCELoss
+
+  tr_args:
+    (): transformers.training_args.TrainingArguments
+    output_dir: !path ${OUTPUT_DIR}/colturk-vdr-stage1-negs4
+    num_train_epochs: 1                      # ~3385 step TAVAN; curve-eval ZIRVEDE DUR (1500 overshoot dersi)
+    per_device_train_batch_size: 2           # F29: ColbertPairwiseNegativeCELoss in-batch terimi scores.topk(2,dim=1) -> per_device>=2 ZORUNLU (B=1 "k out of range"). Base ile ayni (ckpt-1000 bu degerle egitildi).
+    gradient_accumulation_steps: 16          # effective batch 32 (2 x 16) — base ile ayni. num_negs=4 -> neg forward 2x8 gorsel; 80GB'ye sigmazsa num_negs 3'e dus (smoke OOM-check).
+    learning_rate: 5.0e-5                    # S47 kazanan (degistirilmedi — tek degisken num_negs)
+    lr_scheduler_type: "linear"
+    warmup_steps: 10
+    bf16: true
+    optim: "adamw_torch"
+    save_strategy: "steps"
+    save_steps: 125                          # ince curve cozunurlugu (zirveyi 125-step icinde yakala)
+    save_total_limit: 3
+    eval_strategy: "no"
+    logging_steps: 10
+    report_to: "wandb"
+    run_name: "colturk-vdr-stage1-negs4"
+    dataloader_num_workers: 8
+    gradient_checkpointing: true
+    seed: 42
+
+  peft_config:
+    (): peft.LoraConfig
+    r: 32
+    lora_alpha: 32
+    lora_dropout: 0.1
+    init_lora_weights: "gaussian"
+    bias: "none"
+    task_type: "FEATURE_EXTRACTION"
+    target_modules: '(.*(language_model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$)'
+    modules_to_save: ["custom_text_proj"]
+
+# Çalıştırma (fresh, push ayrı repoya):
+#   python scripts/training/launch_stage1_sweep.py \
+#     configs/qwen3/train_colturk_stage1_negs4.yaml \
+#     --push-to-hub Verm1ion/ColTurk-VDR-Stage1-negs4
+# Smoke önce: ... --smoke-step
+# Curve: ~750/1000/1250 checkpoint'lerini eval_colturk_checkpoint.py ile ölç → zirveyi bul → ckpt-1000 (0.5584) ile kıyasla.

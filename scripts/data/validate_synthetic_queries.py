@@ -1,7 +1,7 @@
 """Sentetik TR query QC filtresi — promptc.md §2 quality control thresholds.
 
-Mert workflow:
-1. Claude.ai web UI'da TR query üret (prompt 04 veya 05)
+Workflow:
+1. TR query'leri üret (prompt 04 veya 05 şablonlarıyla)
 2. JSONL'leri `data/synthetic_tr/queries/<source>_queries.jsonl` altına kaydet
 3. Bu script'i çalıştır → reject etmemiş query'ler `<source>_queries_filtered.jsonl`'a yazılır
 4. QC raporu (`<source>_qc_report.json`) reject sayılarını verir

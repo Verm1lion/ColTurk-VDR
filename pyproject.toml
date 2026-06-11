@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "colturk-vdr"
-version = "0.1.0-pre"
+version = "1.0.0"
 description = "A late-interaction visual document retriever for Turkish enterprise documents (ColBERT-style on Qwen3-VL-4B)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "Mert Karatay", email = "info@yenipara.tech" }]
+authors = [{ name = "Mert Karatay", email = "merttkaratayy@gmail.com" }]
 keywords = ["computer-vision", "visual-document-retrieval", "colpali", "colbert", "qwen3-vl", "turkish", "multimodal", "rag"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",

@@ -134,24 +134,44 @@ def _load_model(base: str, adapter: str | None, max_visual_tokens: int | None = 
     import torch
     from colpali_engine.models import ColQwen3, ColQwen3Processor
 
-    logger.info("Loading base ColQwen3: %s", base)
-    model = ColQwen3.from_pretrained(
-        base,
-        torch_dtype=torch.bfloat16,
-        device_map="cuda:0",
-        attn_implementation="sdpa",
-    ).eval()
+    import os as _os
 
-    if adapter:
-        logger.info("Attaching LoRA adapter: %s", adapter)
-        from peft import PeftModel
+    # Phase-D soup output is a FULL merged ColQwen3 (LoRA baked in + averaged custom_text_proj),
+    # i.e. a local dir WITHOUT adapter_config.json -> load directly, no PeftModel.
+    is_merged_full = bool(
+        adapter
+        and _os.path.isdir(adapter)
+        and not _os.path.exists(_os.path.join(adapter, "adapter_config.json"))
+        and _os.path.exists(_os.path.join(adapter, "config.json"))
+    )
 
-        model = PeftModel.from_pretrained(model, adapter).eval()
+    if is_merged_full:
+        logger.info("Loading MERGED FULL model (soup, no adapter_config.json): %s", adapter)
+        model = ColQwen3.from_pretrained(
+            adapter,
+            torch_dtype=torch.bfloat16,
+            device_map="cuda:0",
+            attn_implementation="sdpa",
+        ).eval()
     else:
-        logger.warning(
-            "NO-ADAPTER base control: raw base, custom_text_proj is RANDOM-init "
-            "-> embeddings ~meaningless -> floor NDCG expected (this is the causal control)."
-        )
+        logger.info("Loading base ColQwen3: %s", base)
+        model = ColQwen3.from_pretrained(
+            base,
+            torch_dtype=torch.bfloat16,
+            device_map="cuda:0",
+            attn_implementation="sdpa",
+        ).eval()
+
+        if adapter:
+            logger.info("Attaching LoRA adapter: %s", adapter)
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(model, adapter).eval()
+        else:
+            logger.warning(
+                "NO-ADAPTER base control: raw base, custom_text_proj is RANDOM-init "
+                "-> embeddings ~meaningless -> floor NDCG expected (this is the causal control)."
+            )
 
     proc_kwargs: dict[str, Any] = {}
     if max_visual_tokens:
