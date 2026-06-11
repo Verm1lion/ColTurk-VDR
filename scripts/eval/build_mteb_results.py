@@ -32,18 +32,18 @@ import argparse
 import json
 import os
 
-# V3 public subtask slug (ours) -> MTEB v2 task name. PLACEHOLDER names — replace from
-# `mteb.get_benchmark("ViDoRe(v3)")` in Colab. ViDoRe V3 languages: EN docs + EN/FR queries
-# for *_en subtasks; FR docs+queries for finance_fr/physics/energy(FR). Set per task in Colab.
+# V3 public subtask slug (ours) -> MTEB v2 task name.
+# VERIFIED 2026-06-11 against mteb main `benchmarks.py` VIDORE_V3 definition
+# (10 tasks total; Telecom + Nuclear are the private held-out splits run by the MTEB team).
 TASK_NAME_MAP = {
-    "vidore/vidore_v3_finance_en":       "VidoreV3FinanceEn",        # VERIFY
-    "vidore/vidore_v3_finance_fr":       "VidoreV3FinanceFr",        # VERIFY
-    "vidore/vidore_v3_hr":               "VidoreV3Hr",               # VERIFY
-    "vidore/vidore_v3_industrial":       "VidoreV3Industrial",       # VERIFY
-    "vidore/vidore_v3_computer_science": "VidoreV3ComputerScience",  # VERIFY
-    "vidore/vidore_v3_pharmaceuticals":  "VidoreV3Pharmaceuticals",  # VERIFY
-    "vidore/vidore_v3_physics":          "VidoreV3Physics",          # VERIFY
-    "vidore/vidore_v3_energy":           "VidoreV3Energy",           # VERIFY
+    "vidore/vidore_v3_finance_en":       "Vidore3FinanceEnRetrieval",
+    "vidore/vidore_v3_finance_fr":       "Vidore3FinanceFrRetrieval",
+    "vidore/vidore_v3_hr":               "Vidore3HrRetrieval",
+    "vidore/vidore_v3_industrial":       "Vidore3IndustrialRetrieval",
+    "vidore/vidore_v3_computer_science": "Vidore3ComputerScienceRetrieval",
+    "vidore/vidore_v3_pharmaceuticals":  "Vidore3PharmaceuticalsRetrieval",
+    "vidore/vidore_v3_physics":          "Vidore3PhysicsRetrieval",
+    "vidore/vidore_v3_energy":           "Vidore3EnergyRetrieval",
 }
 
 # eng-Latn for *_en (+ fra-Latn queries on _en per V3); fra-Latn for the FR subtasks.
