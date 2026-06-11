@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://huggingface.co/Verm1ion/ColTurk-VDR-Qwen3VL-4B-v1.0/resolve/main/assets/banner.png" alt="ColTurk-VDR" width="100%" />
+</p>
+
 # ColTurk-VDR
 
 > **v1.0 · 2026-06** — ColBERT-style late-interaction **visual document retriever** built on **Qwen3-VL-4B-Instruct** (Apache-2.0) via `colpali_engine.models.ColQwen3`. Evaluated on the full ViDoRe V3 public benchmark: **NDCG@10 = 0.5584** (8 subtasks, full corpus, all queries, bootstrap 95% CI).

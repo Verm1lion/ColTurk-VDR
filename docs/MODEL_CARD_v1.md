@@ -19,6 +19,17 @@ pipeline_tag: visual-document-retrieval
 library_name: colpali
 ---
 
+<p align="center">
+  <img src="https://huggingface.co/Verm1ion/ColTurk-VDR-Qwen3VL-4B-v1.0/resolve/main/assets/banner.png" alt="banner" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://huggingface.co/blog/QuentinJG/introducing-vidore-v3"><img src="https://img.shields.io/badge/ViDoRe%20V3-NDCG%4010%200.5584-4dd0e1?style=flat-square" /></a>
+  <a href="https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct"><img src="https://img.shields.io/badge/Base-Qwen3--VL--4B-6f42c1?style=flat-square" /></a>
+  <a href="https://huggingface.co/Verm1ion/ColTurk-VDR-Qwen3VL-4B-v1.0"><img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" /></a>
+  <a href="https://github.com/Verm1lion/ColTurk-VDR"><img src="https://img.shields.io/badge/GitHub-ColTurk--VDR-181717?style=flat-square&logo=github" /></a>
+</p>
+
 # ColTurk-VDR-Qwen3VL-4B v1.0
 
 ColBERT-style **late-interaction visual document retriever** built on [Qwen/Qwen3-VL-4B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct) with the [colpali-engine](https://github.com/illuin-tech/colpali) `ColQwen3` architecture (transformers v5 native). Pages are embedded as multi-vector 128-dim patch/token embeddings; queries and documents are scored with MaxSim.
