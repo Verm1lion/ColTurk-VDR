@@ -105,3 +105,7 @@ output/
 results/
 submissions/
 demo_videos/
+
+# Official eval result JSONs ARE published (referenced by README + validity report)
+!eval/results/
+!eval/results/*.json

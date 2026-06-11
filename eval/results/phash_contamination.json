@@ -1,0 +1,114 @@
+{
+  "scan": "phash_contamination",
+  "train_corpus": "manu/colpali-corpus",
+  "train_hashed": 3000,
+  "note": "pHash over-flags documents on LAYOUT; true-dup bar is exact/<=2, <=6 needs visual confirm",
+  "overall": {
+    "v3_hashed": 8000,
+    "exact": 0,
+    "le2": 2,
+    "le2_percent": 0.025,
+    "le4": 13,
+    "le6": 88,
+    "le6_percent": 1.1,
+    "verdict": "LAYOUT-FP-LIKELY (visual confirm via --dump-pairs)"
+  },
+  "per_subtask": [
+    {
+      "subtask": "vidore/vidore_v3_finance_en",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 0,
+      "le4": 3,
+      "le6": 21,
+      "le6_percent": 2.1,
+      "le2_percent": 0.0,
+      "min_hamming_min": 4,
+      "min_hamming_median": 12
+    },
+    {
+      "subtask": "vidore/vidore_v3_finance_fr",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 0,
+      "le4": 1,
+      "le6": 4,
+      "le6_percent": 0.4,
+      "le2_percent": 0.0,
+      "min_hamming_min": 4,
+      "min_hamming_median": 14
+    },
+    {
+      "subtask": "vidore/vidore_v3_hr",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 1,
+      "le4": 2,
+      "le6": 18,
+      "le6_percent": 1.8,
+      "le2_percent": 0.1,
+      "min_hamming_min": 2,
+      "min_hamming_median": 12
+    },
+    {
+      "subtask": "vidore/vidore_v3_industrial",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 0,
+      "le4": 2,
+      "le6": 10,
+      "le6_percent": 1.0,
+      "le2_percent": 0.0,
+      "min_hamming_min": 4,
+      "min_hamming_median": 14
+    },
+    {
+      "subtask": "vidore/vidore_v3_computer_science",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 0,
+      "le4": 0,
+      "le6": 18,
+      "le6_percent": 1.8,
+      "le2_percent": 0.0,
+      "min_hamming_min": 6,
+      "min_hamming_median": 12
+    },
+    {
+      "subtask": "vidore/vidore_v3_pharmaceuticals",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 0,
+      "le4": 2,
+      "le6": 11,
+      "le6_percent": 1.1,
+      "le2_percent": 0.0,
+      "min_hamming_min": 4,
+      "min_hamming_median": 14
+    },
+    {
+      "subtask": "vidore/vidore_v3_physics",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 0,
+      "le4": 0,
+      "le6": 0,
+      "le6_percent": 0.0,
+      "le2_percent": 0.0,
+      "min_hamming_min": 10,
+      "min_hamming_median": 16
+    },
+    {
+      "subtask": "vidore/vidore_v3_energy",
+      "n_v3_hashed": 1000,
+      "exact": 0,
+      "le2": 1,
+      "le4": 3,
+      "le6": 6,
+      "le6_percent": 0.6,
+      "le2_percent": 0.1,
+      "min_hamming_min": 2,
+      "min_hamming_median": 14
+    }
+  ]
+}
